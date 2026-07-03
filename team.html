@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Spieleabend, Team</title>
+<link rel="stylesheet" href="brand.css">
+<style>
+  body { padding: 20px 16px 60px; }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  .logo-row { text-align: center; margin-bottom: 24px; }
+  .logo-row h1 { font-size: 22px; line-height: 1.15; }
+  .logo-row .eyebrow { display:block; margin-bottom: 6px; }
+
+  .color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
+  .color-swatch {
+    aspect-ratio: 1; border-radius: 14px; border: 3px solid transparent;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 800; font-size: 22px;
+  }
+  .color-swatch.taken { opacity: 0.25; cursor: not-allowed; }
+  .color-swatch.selected { border-color: var(--ink); }
+
+  .field { margin: 16px 0; }
+  .field label { display:block; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); margin-bottom: 6px; }
+  .field input { width: 100%; }
+
+  .prio-grid { display: grid; gap: 10px; margin: 16px 0; }
+  .prio-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    background: white; border: 2px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; cursor: pointer; font-weight: 700;
+  }
+  .prio-btn.picked { border-color: var(--ink); background: var(--yellow-soft); }
+  .prio-btn .sub { font-weight: 400; color: var(--ink-soft); font-size: 12px; }
+  .prio-count { text-align:center; color: var(--ink-soft); font-size: 13px; margin-bottom: 6px; }
+
+  .stage-badge { display:inline-block; background: var(--ink); color: white; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 800; margin-bottom: 14px; }
+  .big-title { font-size: clamp(26px, 8vw, 40px); line-height: 1.05; margin: 6px 0 10px; }
+  .rule-text { font-size: 16px; line-height: 1.5; color: var(--ink-soft); }
+  .timer-big { font-size: 56px; font-weight: 900; text-align: center; margin: 18px 0; font-variant-numeric: tabular-nums; }
+
+  .buzzer-btn {
+    width: 100%; aspect-ratio: 1.4; border-radius: 28px; font-size: 28px; font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.04em; margin-top: 20px;
+  }
+  .buzzer-btn.locked { background: var(--line); color: var(--ink-soft); }
+
+  .taste-slot { display:flex; gap: 8px; margin-bottom: 8px; align-items:center; }
+  .taste-slot input { flex:1; }
+  .taste-slot .n { width: 22px; font-weight: 800; color: var(--ink-soft); }
+
+  .team-chip { display:flex; align-items:center; gap:10px; padding: 10px 14px; background: white; border-radius: 12px; border: 1px solid var(--line); margin-bottom: 16px; }
+  .team-dot { width: 16px; height:16px; border-radius:50%; flex-shrink:0; }
+  .team-chip .name { font-weight: 800; flex:1; }
+  .team-chip .points { font-weight: 900; }
+
+  .save-note { text-align:center; font-size: 12px; color: var(--ink-soft); margin-top: 10px; height: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">Lädt…</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script src="shared.js"></script>
+<script>
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const LS_KEY = 'spieleabend_teamId';
+let teamId = localStorage.getItem(LS_KEY);
+if (!teamId) {
+  teamId = 'team_' + Math.random().toString(36).slice(2, 10);
+  localStorage.setItem(LS_KEY, teamId);
+}
+
+let teamsSnapshot = {};
+let myTeam = null;
+let gameState = { activeGameId: null, phase: 'idle', timerEndsAt: null, timerDuration: null, round: 1 };
+let gameData = {}; // /games snapshot
+
+const app = document.getElementById('app');
+
+db.ref('teams').on('value', snap => {
+  teamsSnapshot = snap.val() || {};
+  myTeam = teamsSnapshot[teamId] || null;
+  render();
+});
+db.ref('gameState').on('value', snap => {
+  gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1 }, snap.val() || {});
+  render();
+});
+db.ref('games').on('value', snap => {
+  gameData = snap.val() || {};
+  render();
+});
+
+function takenColors() {
+  return new Set(Object.entries(teamsSnapshot)
+    .filter(([id]) => id !== teamId)
+    .map(([, t]) => t.colorId));
+}
+
+function joinScreen() {
+  const taken = takenColors();
+  const draft = joinScreen._draft || { colorId: null, name: '' };
+  joinScreen._draft = draft;
+
+  return `
+    <div class="logo-row">
+      <span class="eyebrow">Spieleabend</span>
+      <h1>Erobere die<br>Christusgemeinde<br>Hemmingen</h1>
+    </div>
+    <div class="panel">
+      <div class="field"><label>Team-Name</label>
+        <input id="nameInput" type="text" placeholder="Euer Team-Name" value="${escapeHtml(draft.name)}">
+      </div>
+      <div class="field"><label>Farbe wählen</label>
+        <div class="color-grid">
+          ${TEAM_COLORS.map(c => `
+            <div class="color-swatch ${taken.has(c.id) ? 'taken' : ''} ${draft.colorId === c.id ? 'selected' : ''}"
+              style="background:${c.hex};" data-color="${c.id}"
+              onclick="${taken.has(c.id) ? '' : `pickColor('${c.id}')`}">
+              ${draft.colorId === c.id ? '✓' : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <button style="width:100%;" onclick="joinTeam()">Team anmelden</button>
+    </div>
+  `;
+}
+function pickColor(id) { joinScreen._draft = Object.assign(joinScreen._draft || {}, { colorId: id }); render(); }
+function joinTeam() {
+  const name = document.getElementById('nameInput').value.trim();
+  const draft = joinScreen._draft || {};
+  if (!name) { alert('Bitte einen Team-Namen eingeben.'); return; }
+  if (!draft.colorId) { alert('Bitte eine Farbe wählen.'); return; }
+  db.ref('teams/' + teamId).set({
+    name, colorId: draft.colorId, prios: [], joinedAt: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
+// keep name draft while typing
+document.addEventListener('input', e => {
+  if (e.target && e.target.id === 'nameInput') { joinScreen._draft = Object.assign(joinScreen._draft || {}, { name: e.target.value }); }
+});
+
+function prioScreen() {
+  const prios = myTeam.prios || [];
+  return `
+    <div class="panel">
+      <div class="eyebrow">Eure Prio-Boxen</div>
+      <h2 style="margin:8px 0 4px; font-size:20px;">Wählt genau drei</h2>
+      <div class="prio-count">${prios.length} / 3 gewählt, danach fest gesperrt</div>
+      <div class="prio-grid">
+        ${GAMES.map(g => `
+          <div class="prio-btn ${prios.includes(g.id) ? 'picked' : ''}" onclick="togglePrio('${g.id}')">
+            <span>${g.name}<div class="sub">${g.sub}</div></span>
+            <span>${prios.includes(g.id) ? '✓' : ''}</span>
+          </div>
+        `).join('')}
+      </div>
+      <button style="width:100%;" ${prios.length !== 3 ? 'disabled' : ''} onclick="lockPrios()">Prios festlegen, geht danach nicht mehr</button>
+    </div>
+  `;
+}
+function togglePrio(gameId) {
+  let prios = (myTeam.prios || []).slice();
+  const idx = prios.indexOf(gameId);
+  if (idx >= 0) prios.splice(idx, 1);
+  else { if (prios.length >= 3) return; prios.push(gameId); }
+  db.ref('teams/' + teamId + '/prios').set(prios);
+}
+function lockPrios() {
+  if (!confirm('Prios wirklich festlegen? Das kann danach nicht mehr geändert werden.')) return;
+  db.ref('teams/' + teamId + '/priosLocked').set(true);
+}
+
+function myChip() {
+  const color = (TEAM_COLORS.find(c => c.id === myTeam.colorId) || {}).hex || '#ccc';
+  const total = computeMyPoints();
+  return `
+    <div class="team-chip">
+      <div class="team-dot" style="background:${color};"></div>
+      <div class="name">${escapeHtml(myTeam.name)}</div>
+      <div class="points">${total} Pkt.</div>
+    </div>
+  `;
+}
+
+function computeMyPoints() {
+  let total = 0;
+  GAMES.forEach(g => {
+    const placements = ((gameData[g.id] || {}).placements) || {};
+    for (const p of [1, 2, 3]) {
+      if (placements[p] === teamId) total += pointsForPlacement(p, (myTeam.prios || []).includes(g.id));
+    }
+  });
+  return total;
+}
+
+function liveScreen() {
+  const game = gameById(gameState.activeGameId);
+  let body = '';
+
+  if (!game || gameState.phase === 'idle') {
+    body = `
+      <div class="panel" style="text-align:center; padding: 40px 20px;">
+        <div class="eyebrow">Wartet auf die Regie</div>
+        <div class="big-title">Bereit für<br>den Abend?</div>
+      </div>
+    `;
+  } else if (gameState.phase === 'leaderboard') {
+    body = `
+      <div class="panel" style="text-align:center; padding: 40px 20px;">
+        <div class="eyebrow">Zwischenstand</div>
+        <div class="big-title">${computeMyPoints()} Punkte</div>
+        <div class="rule-text">Die volle Rangliste läuft auf der Leinwand.</div>
+      </div>
+    `;
+  } else if (gameState.phase === 'rules') {
+    body = gameShell(game, `<div class="rule-text">${escapeHtml(game.rule)}</div>`);
+  } else if (gameState.phase === 'closed') {
+    body = gameShell(game, `<div class="rule-text">Runde beendet. Die Regie wertet gerade aus.</div>`);
+  } else if (gameState.phase === 'active') {
+    body = gameShell(game, activeBody(game));
+  } else {
+    body = gameShell(game, `<div class="rule-text">${escapeHtml(game.rule)}</div>`);
+  }
+
+  return `${myChip()}${body}`;
+}
+
+function gameShell(game, inner) {
+  return `
+    <div class="panel" style="border-top: 6px solid ${game.accent};">
+      <span class="stage-badge" style="background:${game.accent};">${escapeHtml(game.sub)}</span>
+      <div class="big-title">${escapeHtml(game.name)}</div>
+      ${inner}
+    </div>
+  `;
+}
+
+function activeBody(game) {
+  if (game.type === 'quiz') return quizBody(game);
+  if (game.type === 'taste') return tasteInput(game);
+  if (game.type === 'buzzer') return buzzerBody(game);
+  // value / manual / race: team just waits, Regie steuert
+  return `<div class="rule-text">${escapeHtml(game.rule)}</div><div class="rule-text" style="margin-top:10px;">Die Regie trägt eure Ergebnisse ein.</div>`;
+}
+
+function quizBody(game) {
+  const myAnswers = ((((gameData.quiz || {}).answers) || {}));
+  const reveal = gameState.quizReveal;
+  const letters = ['A', 'B', 'C', 'D'];
+  let lastCategory = null;
+  let html = '';
+  QUIZ_QUESTIONS.forEach((q, idx) => {
+    const myAnswer = (myAnswers[idx] || {})[teamId];
+    if (q.category !== lastCategory) {
+      html += `<div style="margin: 18px 0 8px; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 14px;">${escapeHtml(q.category)}</div>`;
+      lastCategory = q.category;
+    }
+    const opts = q.options.map((opt, i) => {
+      const picked = myAnswer === i;
+      const isCorrect = reveal && i === q.correct;
+      let bg = 'white', border = 'var(--line)';
+      if (picked && !reveal) { bg = 'var(--yellow-soft)'; border = 'var(--ink)'; }
+      if (reveal && isCorrect) { bg = '#E4F0EE'; border = '#2E7D74'; }
+      if (reveal && picked && !isCorrect) { bg = '#F6E7EA'; border = '#B24C63'; }
+      return `<div onclick="${reveal ? '' : `answerQuiz(${idx}, ${i})`}" style="text-align:left; font-weight:700; margin: 6px 0; padding:10px 14px; border-radius:10px; border:2px solid ${border}; background:${bg}; cursor:${reveal ? 'default' : 'pointer'}; font-size:14px;">
+        ${letters[i]}) ${escapeHtml(opt)}
+      </div>`;
+    }).join('');
+    html += `
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight:800; font-size:15px; margin-bottom:6px;">${idx + 1}. ${escapeHtml(q.text)}</div>
+        ${opts}
+      </div>
+    `;
+  });
+  return html;
+}
+function answerQuiz(idx, optionIndex) {
+  db.ref('games/quiz/answers/' + idx + '/' + teamId).set(optionIndex);
+}
+
+function tasteInput(game) {
+  const answers = ((gameData.taste || {}).answers || {})[teamId] || ['', '', '', '', '', '', ''];
+  const revealedIndex = (gameData.taste || {}).revealedIndex || 0;
+  let slots = '';
+  for (let i = 0; i < 7; i++) {
+    const locked = i < revealedIndex;
+    slots += `
+      <div class="taste-slot">
+        <span class="n">${i + 1}.</span>
+        <input type="text" ${locked ? 'disabled' : ''} value="${escapeHtml(answers[i] || '')}"
+          placeholder="Lebensmittel ${i + 1}" onchange="submitTasteAnswer(${i}, this.value)">
+      </div>
+    `;
+  }
+  return `<div>${slots}</div><div class="save-note">Wird direkt gespeichert, aufgedeckte Felder sind gesperrt</div>`;
+}
+function submitTasteAnswer(index, val) {
+  db.ref('games/taste/answers/' + teamId + '/' + index).set(val);
+}
+
+function buzzerBody(game) {
+  const round = gameState.round || 1;
+  const buzzed = (((gameData[game.id] || {}).rounds || {})[round] || {}).buzzes || {};
+  const alreadyBuzzed = buzzed[teamId];
+  const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
+  return `
+    <div class="rule-text">${label}</div>
+    <button class="buzzer-btn ${alreadyBuzzed ? 'locked' : 'yellow'}" ${alreadyBuzzed ? 'disabled' : ''} onclick="pressBuzzer('${game.id}', ${round})">
+      ${alreadyBuzzed ? 'Gebuzzert!' : 'BUZZER'}
+    </button>
+  `;
+}
+function pressBuzzer(gameId, round) {
+  db.ref('games/' + gameId + '/rounds/' + round + '/buzzes/' + teamId).set(firebase.database.ServerValue.TIMESTAMP);
+}
+
+function render() {
+  if (!myTeam) { app.innerHTML = joinScreen(); return; }
+  if (!myTeam.priosLocked) { app.innerHTML = myChip() + prioScreen(); return; }
+  app.innerHTML = liveScreen();
+}
+
+render();
+</script>
+</body>
+</html>

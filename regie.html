@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spieleabend, Regie</title>
+<link rel="stylesheet" href="brand.css">
+<style>
+  body { padding: 28px 18px 80px; }
+  .layout { max-width: 1100px; margin: 0 auto; display: grid; gap: 20px; }
+  .panel h2 { font-size: 13px; letter-spacing: 0.08em; color: var(--ink-soft); margin-bottom: 14px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .box-btn { background: white; border: 2px solid var(--line); border-radius: 12px; padding: 12px; text-align: left; cursor: pointer; }
+  .box-btn.active { border-color: var(--accent, var(--ink)); background: var(--soft, var(--yellow-soft)); }
+  .box-btn .name { display:block; font-weight: 800; font-size: 13px; }
+  .box-btn .sub { font-weight: 400; font-size: 11px; color: var(--ink-soft); }
+  .phase-row { display:flex; gap:8px; flex-wrap:wrap; margin-top: 14px; }
+  .phase-row button.active { outline: 3px solid var(--yellow); }
+  table { width:100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align:left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 11px; text-transform: uppercase; color: var(--ink-soft); letter-spacing: 0.05em; }
+  .dot { width: 12px; height:12px; border-radius:50%; display:inline-block; margin-right:6px; }
+  .row-flex { display:flex; align-items:center; gap:10px; flex-wrap: wrap; }
+  .timer-display { font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .taste-key-row { display:flex; gap:8px; margin-bottom: 8px; align-items:center; }
+  .match-ok { color: #2E7D74; font-weight: 800; }
+  .match-no { color: #B24C63; font-weight: 800; }
+  .lb-row { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:10px; background: var(--bg); border:1px solid var(--line); margin-bottom:8px; }
+  .lb-row.first { background: var(--yellow-soft); border-color: var(--yellow); }
+  .small { font-size: 12px; color: var(--ink-soft); }
+  select { padding: 8px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div>
+    <span class="eyebrow">Regie</span>
+    <h1 style="font-size: 30px;">Erobere die Christusgemeinde Hemmingen</h1>
+  </div>
+
+  <div class="panel">
+    <h2>Bühne steuern</h2>
+    <div class="grid-2" id="gameGrid"></div>
+    <div class="phase-row" id="phaseRow"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Timer</h2>
+    <div class="row-flex">
+      <button onclick="startTimer()">Start</button>
+      <button class="ghost" onclick="pauseTimer()">Pause</button>
+      <button class="ghost" onclick="resetTimer()">Reset</button>
+      <span class="timer-display" id="timerDisplay">00:00</span>
+      <input type="number" id="timerSeconds" value="120" min="5" style="width:80px;"> Sek.
+    </div>
+  </div>
+
+  <div class="panel" id="gameControlPanel"><h2>Spiel-Steuerung</h2><div class="small">Wähle oben eine Box.</div></div>
+
+  <div class="panel">
+    <h2>Teams (<span id="teamCount">0</span>)</h2>
+    <div id="teamOverview"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Gesamtwertung</h2>
+    <div id="leaderboard"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script src="shared.js"></script>
+<script>
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let teams = {};
+let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null };
+let gameData = {};
+
+db.ref('teams').on('value', s => { teams = s.val() || {}; render(); });
+db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1 }, s.val() || {}); render(); });
+db.ref('games').on('value', s => { gameData = s.val() || {}; render(); });
+
+function setGameState(patch) { db.ref('gameState').update(patch); }
+function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false }); }
+function setPhase(phase) {
+  setGameState({ phase });
+  if (phase === 'closed') autoApplyPlacementsForActiveGame();
+}
+function autoApplyPlacementsForActiveGame() {
+  const game = gameById(gameState.activeGameId);
+  if (!game) return;
+  if (game.type === 'quiz') applyPlacements('quiz', teamRankedByValue(quizScores(), true));
+  else if (game.type === 'buzzer') applyPlacements(game.id, teamRankedByValue(totalInternalPoints(game), true));
+  else if (game.type === 'value') applyPlacements(game.id, teamRankedByValue(((gameData[game.id] || {}).values) || {}, game.higherIsBetter));
+  else if (game.type === 'race') applyPlacements(game.id, teamRankedByValue(((gameData[game.id] || {}).values) || {}, false));
+  else if (game.type === 'taste') applyTastePlacements(game.id);
+  // "manual" (Dreibein) wird bewusst nicht automatisch überschrieben, die Regie wählt dort direkt
+}
+
+// ---------- Timer ----------
+setInterval(() => {
+  const d = document.getElementById('timerDisplay');
+  if (!d) return;
+  if (gameState.timerEndsAt) {
+    const remaining = (gameState.timerEndsAt - Date.now()) / 1000;
+    d.textContent = fmtTime(remaining);
+  } else {
+    d.textContent = fmtTime(gameState.timerDuration || 0);
+  }
+}, 250);
+function startTimer() {
+  const secs = parseInt(document.getElementById('timerSeconds').value, 10) || 120;
+  setGameState({ timerDuration: secs, timerEndsAt: Date.now() + secs * 1000 });
+}
+function pauseTimer() {
+  if (!gameState.timerEndsAt) return;
+  const remaining = Math.max(0, Math.round((gameState.timerEndsAt - Date.now()) / 1000));
+  setGameState({ timerDuration: remaining, timerEndsAt: null });
+}
+function resetTimer() { setGameState({ timerEndsAt: null, timerDuration: parseInt(document.getElementById('timerSeconds').value, 10) || 120 }); }
+
+// ---------- Bühne ----------
+function renderGameGrid() {
+  document.getElementById('gameGrid').innerHTML = GAMES.map(g => `
+    <div class="box-btn ${gameState.activeGameId === g.id ? 'active' : ''}"
+      style="--accent:${g.accent}; --soft:${g.soft};" onclick="setActiveGame('${g.id}')">
+      <span class="name">${g.name}</span><span class="sub">${g.sub}</span>
+    </div>
+  `).join('');
+}
+function renderPhaseRow() {
+  const phases = [['idle', 'Startbildschirm'], ['rules', 'Regeln zeigen'], ['active', 'Spiel aktiv'], ['closed', 'Runde geschlossen'], ['leaderboard', 'Rangliste zeigen']];
+  document.getElementById('phaseRow').innerHTML = phases.map(([p, label]) => `
+    <button class="ghost ${gameState.phase === p ? 'active' : ''}" onclick="setPhase('${p}')">${label}</button>
+  `).join('');
+}
+
+// ---------- Teams ----------
+function teamColor(t) { return (TEAM_COLORS.find(c => c.id === t.colorId) || {}).hex || '#ccc'; }
+function renderTeamOverview() {
+  const entries = Object.entries(teams);
+  document.getElementById('teamCount').textContent = entries.length;
+  document.getElementById('teamOverview').innerHTML = entries.length ? `
+    <table>
+      <thead><tr><th></th><th>Team</th><th>Prios</th><th></th></tr></thead>
+      <tbody>
+        ${entries.map(([id, t]) => `
+          <tr>
+            <td><span class="dot" style="background:${teamColor(t)};"></span></td>
+            <td>${escapeHtml(t.name)}</td>
+            <td class="small">${(t.prios || []).map(p => (gameById(p) || {}).name || p).join(', ')}</td>
+            <td><button class="ghost" onclick="removeTeam('${id}')">Entfernen</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  ` : `<div class="small">Noch keine Teams angemeldet.</div>`;
+}
+function removeTeam(id) { if (confirm('Team wirklich entfernen?')) db.ref('teams/' + id).remove(); }
+
+// ---------- Spiel-Steuerung je Typ ----------
+function renderGameControlPanel() {
+  const panel = document.getElementById('gameControlPanel');
+  const game = gameById(gameState.activeGameId);
+  if (!game) { panel.innerHTML = '<h2>Spiel-Steuerung</h2><div class="small">Wähle oben eine Box.</div>'; return; }
+
+  let html = `<h2>${escapeHtml(game.name)}, ${escapeHtml(game.sub)}</h2>`;
+  if (game.type === 'quiz') html += quizPanel(game);
+  else if (game.type === 'value') html += valuePanel(game);
+  else if (game.type === 'manual') html += manualPanel(game);
+  else if (game.type === 'race') html += racePanel(game);
+  else if (game.type === 'taste') html += tastePanel(game);
+  else if (game.type === 'buzzer') html += buzzerPanel(game);
+  panel.innerHTML = html;
+}
+
+function teamRankedByValue(values, higherIsBetter) {
+  // values: {teamId: number}
+  return Object.entries(values)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .sort((a, b) => higherIsBetter ? b[1] - a[1] : a[1] - b[1])
+    .map(([id]) => id);
+}
+function applyPlacements(gameId, orderedTeamIds) {
+  const placements = {};
+  orderedTeamIds.slice(0, 3).forEach((id, i) => { placements[i + 1] = id; });
+  db.ref('games/' + gameId + '/placements').set(placements);
+}
+function currentPlacementsView(gameId) {
+  const placements = ((gameData[gameId] || {}).placements) || {};
+  const labels = ['🥇', '🥈', '🥉'];
+  return [1, 2, 3].map(p => placements[p] ? `${labels[p - 1]} ${escapeHtml((teams[placements[p]] || {}).name || '?')}` : `${labels[p - 1]} –`).join('&nbsp;&nbsp;');
+}
+
+function quizScores() {
+  const answers = ((gameData.quiz || {}).answers) || {};
+  const scores = {};
+  Object.keys(teams).forEach(id => scores[id] = 0);
+  QUIZ_QUESTIONS.forEach((q, idx) => {
+    const qAnswers = answers[idx] || {};
+    Object.entries(qAnswers).forEach(([teamId, opt]) => {
+      if (opt === q.correct) scores[teamId] = (scores[teamId] || 0) + 1;
+    });
+  });
+  return scores;
+}
+
+function quizPanel(game) {
+  const answers = ((gameData.quiz || {}).answers) || {};
+  const reveal = !!gameState.quizReveal;
+  const teamCount = Object.keys(teams).length;
+
+  const progressRows = Object.entries(teams).map(([id, t]) => {
+    const answered = QUIZ_QUESTIONS.filter((_, idx) => (answers[idx] || {})[id] !== undefined).length;
+    return `<tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td><td>${answered} / ${QUIZ_QUESTIONS.length} beantwortet</td></tr>`;
+  }).join('');
+
+  return `
+    <div class="small" style="margin-bottom:10px;">
+      Alle ${QUIZ_QUESTIONS.length} Fragen stehen gleichzeitig auf den Team-Handys, jedes Team arbeitet in eigenem Tempo. Zeit gibst du oben im Timer vor, wenn die Zeit um ist oder ihr fertig seid, schließt du die Runde, dann wird automatisch ausgewertet.
+    </div>
+    <div class="row-flex" style="margin-bottom:10px;">
+      <button class="ghost" onclick="setGameState({quizReveal: ${reveal ? 'false' : 'true'}})">${reveal ? 'Lösungen wieder verbergen' : 'Lösungen auf den Handys zeigen'}</button>
+    </div>
+    <table><thead><tr><th>Team</th><th>Fortschritt</th></tr></thead><tbody>${progressRows || `<tr><td colspan="2" class="small">Noch keine Teams.</td></tr>`}</tbody></table>
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="applyPlacements('quiz', teamRankedByValue(quizScores(), true))">Gesamtplatzierung übernehmen</button>
+      <span class="small">${currentPlacementsView('quiz')}</span>
+    </div>
+    ${quizScoreTable()}
+  `;
+}
+function quizScoreTable() {
+  const scores = quizScores();
+  const rows = Object.entries(teams).sort((a, b) => (scores[b[0]] || 0) - (scores[a[0]] || 0)).map(([id, t]) => `
+    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td><td>${scores[id] || 0} / ${QUIZ_QUESTIONS.length}</td></tr>
+  `).join('');
+  return `<div class="small" style="margin-top:14px;">Live-Punktestand:</div><table><thead><tr><th>Team</th><th>Richtige Antworten</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function valuePanel(game) {
+  const values = ((gameData[game.id] || {}).values) || {};
+  const rows = Object.entries(teams).map(([id, t]) => `
+    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td>
+    <td><input type="number" style="width:90px;" value="${values[id] != null ? values[id] : ''}" onchange="db.ref('games/${game.id}/values/${id}').set(parseFloat(this.value)||0)"></td></tr>
+  `).join('');
+  return `
+    <table><thead><tr><th>Team</th><th>${escapeHtml(game.valueLabel)}</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="applyPlacements('${game.id}', teamRankedByValue((gameData.${game.id}||{}).values || {}, ${game.higherIsBetter}))">Platzierung übernehmen</button>
+      <span class="small">${currentPlacementsView(game.id)}</span>
+    </div>
+  `;
+}
+
+function manualPanel(game) {
+  const placements = ((gameData[game.id] || {}).placements) || {};
+  const opts = id => Object.entries(teams).map(([tid, t]) => `<option value="${tid}" ${placements[id] === tid ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+  return `
+    <div class="row-flex">
+      🥇 <select onchange="db.ref('games/${game.id}/placements/1').set(this.value)"><option value="">–</option>${opts(1)}</select>
+      🥈 <select onchange="db.ref('games/${game.id}/placements/2').set(this.value)"><option value="">–</option>${opts(2)}</select>
+      🥉 <select onchange="db.ref('games/${game.id}/placements/3').set(this.value)"><option value="">–</option>${opts(3)}</select>
+    </div>
+  `;
+}
+
+function raceHeats() {
+  // Teams stabil nach Anmeldezeit sortieren, dann in Dreier-Gruppen aufteilen
+  const ordered = Object.entries(teams).sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0)).map(([id]) => id);
+  const heats = [];
+  for (let i = 0; i < ordered.length; i += 3) heats.push(ordered.slice(i, i + 3));
+  return heats;
+}
+
+function racePanel(game) {
+  const times = ((gameData[game.id] || {}).values) || {};
+  const heats = raceHeats();
+  const heatIndex = window._raceHeatIndex = (window._raceHeatIndex == null ? 0 : window._raceHeatIndex);
+  const heat = heats[heatIndex] || [];
+  const isFinal = heatIndex === heats.length - 1;
+
+  const heatButtons = heats.map((h, i) => `
+    <button class="ghost ${i === heatIndex ? 'active' : ''}" onclick="window._raceHeatIndex=${i}; render();">
+      ${i === heats.length - 1 && heats.length > 1 ? 'Finale' : 'Runde ' + (i + 1)}
+    </button>
+  `).join('');
+
+  const laneRows = heat.map(id => `
+    <div class="row-flex">
+      <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
+      <span style="min-width:140px;">${escapeHtml((teams[id] || {}).name || '')}</span>
+      <button class="ghost" onclick="stopLane('${id}', '${game.id}')">Stopp</button>
+      <span class="small">${times[id] != null ? times[id] + ' s' : '–'}</span>
+    </div>
+  `).join('');
+
+  const rankedAll = teamRankedByValue(times, false);
+  const overview = Object.entries(teams).map(([id, t]) => `
+    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td><td>${times[id] != null ? times[id] + ' s' : '–'}</td></tr>
+  `).join('');
+
+  return `
+    <div class="row-flex" style="margin-bottom:10px; flex-wrap:wrap;">${heatButtons}</div>
+    <div class="row-flex" style="margin-bottom:10px;">
+      <span style="font-weight:800;">${isFinal && heats.length > 1 ? 'Finale' : 'Runde ' + (heatIndex + 1)}</span>
+      <button onclick="startRace()">Start</button>
+      <span class="small" id="raceStartInfo">${window._raceStart ? 'Läuft…' : 'Nicht gestartet'}</span>
+    </div>
+    ${laneRows || '<div class="small">Keine Teams in dieser Runde.</div>'}
+    <table style="margin-top:14px;"><thead><tr><th>Team</th><th>Zeit</th></tr></thead><tbody>${overview}</tbody></table>
+    <div class="small" style="margin-top:10px;">Platzierung wird automatisch aus den schnellsten Zeiten berechnet, sobald genug Zeiten vorliegen.</div>
+    <div class="row-flex" style="margin-top:8px;">${currentPlacementsView(game.id)}</div>
+  `;
+}
+function startRace() { window._raceStart = Date.now(); render(); }
+function stopLane(teamId, gameId) {
+  if (!window._raceStart) { alert('Zuerst Start drücken.'); return; }
+  const seconds = Math.round((Date.now() - window._raceStart) / 100) / 10;
+  db.ref('games/' + gameId + '/values/' + teamId).set(seconds).then(() => autoApplyRacePlacements(gameId));
+}
+function autoApplyRacePlacements(gameId) {
+  const values = ((gameData[gameId] || {}).values) || {};
+  applyPlacements(gameId, teamRankedByValue(values, false));
+}
+
+function tastePanel(game) {
+  const t = gameData.taste || {};
+  const key = t.key || ['', '', '', '', ''];
+  const revealedIndex = t.revealedIndex || 0;
+  const answers = t.answers || {};
+  const overrides = t.overrides || {};
+
+  const keyInputs = key.map((v, i) => `
+    <div class="taste-key-row"><span>${i + 1}.</span>
+      <input type="text" value="${escapeHtml(v)}" onchange="setTasteKey(${i}, this.value)" placeholder="Lösung ${i + 1}">
+    </div>
+  `).join('');
+
+  const rows = Object.entries(teams).map(([id, t2]) => {
+    const cells = [0, 1, 2, 3, 4].map(i => {
+      if (i >= revealedIndex) return `<td class="small">–</td>`;
+      const guess = (answers[id] || [])[i] || '';
+      const auto = fuzzyMatch(guess, key[i]);
+      const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
+      return `<td>
+        ${escapeHtml(guess)} <span class="${isCorrect ? 'match-ok' : 'match-no'}">${isCorrect ? '✓' : '✗'}</span>
+        <button class="ghost" style="padding:2px 6px; font-size:11px;" onclick="toggleTasteOverride('${id}', ${i}, ${!isCorrect})">${isCorrect ? 'als falsch' : 'als richtig'}</button>
+      </td>`;
+    }).join('');
+    return `<tr><td><span class="dot" style="background:${teamColor(t2)};"></span>${escapeHtml(t2.name)}</td>${cells}</tr>`;
+  }).join('');
+
+  return `
+    <div class="small" style="margin-bottom:8px;">Lösung einmalig hinterlegen:</div>
+    ${keyInputs}
+    <div class="row-flex" style="margin: 12px 0;">
+      <button onclick="revealNextTaste()">Nächstes Lebensmittel aufdecken (${revealedIndex}/5)</button>
+    </div>
+    <table><thead><tr><th>Team</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="applyTastePlacements('${game.id}')">Platzierung übernehmen</button>
+      <span class="small">${currentPlacementsView(game.id)}</span>
+    </div>
+  `;
+}
+function setTasteKey(i, val) { db.ref('games/taste/key/' + i).set(val); }
+function revealNextTaste() {
+  const current = (gameData.taste || {}).revealedIndex || 0;
+  if (current >= 5) return;
+  db.ref('games/taste/revealedIndex').set(current + 1);
+}
+function toggleTasteOverride(teamId, i, value) { db.ref('games/taste/overrides/' + teamId + '_' + i).set(value); }
+function applyTastePlacements(gameId) {
+  const t = gameData.taste || {};
+  const key = t.key || [];
+  const answers = t.answers || {};
+  const overrides = t.overrides || {};
+  const counts = {};
+  Object.entries(teams).forEach(([id]) => {
+    let count = 0;
+    for (let i = 0; i < 5; i++) {
+      const guess = (answers[id] || [])[i] || '';
+      const auto = fuzzyMatch(guess, key[i]);
+      const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
+      if (isCorrect) count++;
+    }
+    counts[id] = count;
+  });
+  applyPlacements(gameId, teamRankedByValue(counts, true));
+}
+
+function roundPoints(game, round) {
+  // Gibt {teamId: internePunkte} für eine Runde zurück, 3-2-1 für die ersten drei korrekt markierten Teams in Buzz-Reihenfolge
+  const rounds = ((gameData[game.id] || {}).rounds) || {};
+  const buzzes = (rounds[round] || {}).buzzes || {};
+  const marks = (rounds[round] || {}).marks || {};
+  const order = Object.entries(buzzes).sort((a, b) => a[1] - b[1]).map(([id]) => id);
+  const correctInOrder = order.filter(id => marks[id] === 'correct');
+  const scale = [3, 2, 1];
+  const pts = {};
+  correctInOrder.slice(0, 3).forEach((id, i) => { pts[id] = scale[i]; });
+  return pts;
+}
+function totalInternalPoints(game) {
+  const totals = {};
+  for (let r = 1; r <= game.rounds; r++) {
+    const pts = roundPoints(game, r);
+    Object.entries(pts).forEach(([id, p]) => { totals[id] = (totals[id] || 0) + p; });
+  }
+  return totals;
+}
+
+function buzzerPanel(game) {
+  const round = gameState.round || 1;
+  const rounds = ((gameData[game.id] || {}).rounds) || {};
+  const buzzes = (rounds[round] || {}).buzzes || {};
+  const marks = (rounds[round] || {}).marks || {};
+
+  const order = Object.entries(buzzes).sort((a, b) => a[1] - b[1]);
+  const correctCount = order.filter(([id]) => marks[id] === 'correct').length;
+  const nextUp = order.find(([id]) => !marks[id]);
+  const canMarkMore = correctCount < 3 && nextUp;
+
+  let orderHtml = order.length ? `
+    <table><thead><tr><th>#</th><th>Team</th><th>Zeit</th><th></th></tr></thead><tbody>
+      ${order.map(([id, ts], i) => {
+        const baseTs = order[0][1];
+        const mark = marks[id];
+        const status = mark === 'correct' ? '✓ richtig' : mark === 'wrong' ? '✗ falsch' : (nextUp && nextUp[0] === id && canMarkMore ? '→ jetzt dran' : 'wartet');
+        return `<tr><td>${i + 1}</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>${escapeHtml((teams[id] || {}).name || id)}</td>
+          <td class="small">+${((ts - baseTs) / 1000).toFixed(1)} s</td><td class="small">${status}</td></tr>`;
+      }).join('')}
+    </tbody></table>
+  ` : `<div class="small">Noch niemand hat gebuzzert.</div>`;
+
+  let actionHtml = '';
+  if (canMarkMore) {
+    actionHtml = `
+      <div class="row-flex" style="margin-top:10px;">
+        <span>${escapeHtml((teams[nextUp[0]] || {}).name || '')} ist dran:</span>
+        <button onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', true)">Richtig</button>
+        <button class="ghost" onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', false)">Falsch</button>
+      </div>
+    `;
+  }
+
+  const roundPts = roundPoints(game, round);
+  const roundPtsHtml = `<div class="small" style="margin-top:8px;">Punkte diese Runde: ${
+    Object.entries(roundPts).map(([id, p]) => `${escapeHtml((teams[id] || {}).name || id)}: ${p}`).join(', ') || '–'
+  }</div>`;
+
+  const totals = totalInternalPoints(game);
+  const totalsHtml = `<div class="small" style="margin-top:4px;">Gesamt über alle Runden: ${
+    Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([id, p]) => `${escapeHtml((teams[id] || {}).name || id)}: ${p}`).join(', ') || '–'
+  }</div>`;
+
+  return `
+    <div class="row-flex">
+      <span>Runde ${round} / ${game.rounds}</span>
+      <button class="ghost" onclick="setGameState({round: Math.max(1, ${round} - 1)})">Zurück</button>
+      <button class="ghost" onclick="setGameState({round: Math.min(${game.rounds}, ${round} + 1)})">Nächste Runde</button>
+    </div>
+    ${orderHtml}
+    ${actionHtml}
+    ${roundPtsHtml}
+    ${totalsHtml}
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="applyPlacements('${game.id}', teamRankedByValue(totalInternalPoints(gameById('${game.id}')), true))">Gesamtplatzierung übernehmen</button>
+      <span class="small">${currentPlacementsView(game.id)}</span>
+    </div>
+  `;
+}
+function markBuzz(gameId, round, teamId, correct) {
+  db.ref('games/' + gameId + '/rounds/' + round + '/marks/' + teamId).set(correct ? 'correct' : 'wrong');
+}
+
+// ---------- Leaderboard ----------
+function computeLeaderboard() {
+  const totals = {};
+  Object.keys(teams).forEach(id => totals[id] = 0);
+  GAMES.forEach(g => {
+    const placements = ((gameData[g.id] || {}).placements) || {};
+    [1, 2, 3].forEach(p => {
+      const id = placements[p];
+      if (id && teams[id]) {
+        const isPrio = (teams[id].prios || []).includes(g.id);
+        totals[id] = (totals[id] || 0) + pointsForPlacement(p, isPrio);
+      }
+    });
+  });
+  return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+}
+function renderLeaderboard() {
+  const ranked = computeLeaderboard();
+  document.getElementById('leaderboard').innerHTML = ranked.length ? ranked.map(([id, pts], i) => `
+    <div class="lb-row ${i === 0 ? 'first' : ''}">
+      <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
+      <span style="flex:1; font-weight:700;">${escapeHtml((teams[id] || {}).name || '?')}</span>
+      <span style="font-weight:900;">${pts} Pkt.</span>
+    </div>
+  `).join('') : `<div class="small">Noch keine Teams.</div>`;
+}
+
+function render() {
+  renderGameGrid();
+  renderPhaseRow();
+  renderTeamOverview();
+  renderGameControlPanel();
+  renderLeaderboard();
+}
+render();
+</script>
+</body>
+</html>

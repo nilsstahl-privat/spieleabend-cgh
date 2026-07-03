@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+
+:root {
+  --bg: #F2F0ED;
+  --ink: #212222;
+  --ink-soft: #5C5A54;
+  --line: #DEDACF;
+  --teal: #6FC3C1;
+  --teal-soft: #E4F5F4;
+  --yellow: #FDE235;
+  --yellow-soft: #FFF8DC;
+  --taupe: #B4A493;
+  --taupe-soft: #F1ECE6;
+  --panel: #FFFFFF;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+h1, h2, h3, .caps {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+button {
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 18px;
+  cursor: pointer;
+  background: var(--ink);
+  color: white;
+}
+button.teal { background: var(--teal); color: var(--ink); }
+button.yellow { background: var(--yellow); color: var(--ink); }
+button.ghost { background: transparent; color: var(--ink-soft); border: 1px solid var(--line); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+input, select, textarea {
+  font-family: inherit;
+  font-size: 15px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 22px;
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
