@@ -79,6 +79,7 @@ let teamsSnapshot = {};
 let myTeam = null;
 let gameState = { activeGameId: null, phase: 'idle', timerEndsAt: null, timerDuration: null, round: 1 };
 let gameData = {}; // /games snapshot
+let connected = true;
 
 const app = document.getElementById('app');
 
@@ -95,6 +96,13 @@ db.ref('games').on('value', snap => {
   gameData = snap.val() || {};
   render();
 });
+db.ref('.info/connected').on('value', snap => {
+  connected = snap.val() === true;
+  render();
+});
+function connBadgeHtml() {
+  return `<div class="small" style="text-align:center; margin-bottom:10px; font-weight:800; color:${connected ? '#2E7D74' : '#B24C63'};">${connected ? '● verbunden' : '● keine Verbindung, prüft euer WLAN'}</div>`;
+}
 
 function takenColors() {
   return new Set(Object.entries(teamsSnapshot)
@@ -139,7 +147,7 @@ function joinTeam() {
   if (!draft.colorId) { alert('Bitte eine Farbe wählen.'); return; }
   db.ref('teams/' + teamId).set({
     name, colorId: draft.colorId, prios: [], joinedAt: firebase.database.ServerValue.TIMESTAMP,
-  });
+  }).catch(err => { console.error(err); alert('Anmeldung konnte nicht gespeichert werden, bitte nochmal versuchen.'); });
 }
 // keep name draft while typing
 document.addEventListener('input', e => {
@@ -170,11 +178,11 @@ function togglePrio(gameId) {
   const idx = prios.indexOf(gameId);
   if (idx >= 0) prios.splice(idx, 1);
   else { if (prios.length >= 3) return; prios.push(gameId); }
-  db.ref('teams/' + teamId + '/prios').set(prios);
+  db.ref('teams/' + teamId + '/prios').set(prios).catch(console.error);
 }
 function lockPrios() {
   if (!confirm('Prios wirklich festlegen? Das kann danach nicht mehr geändert werden.')) return;
-  db.ref('teams/' + teamId + '/priosLocked').set(true);
+  db.ref('teams/' + teamId + '/priosLocked').set(true).catch(err => { console.error(err); alert('Konnte nicht gespeichert werden, bitte nochmal versuchen.'); });
 }
 
 function myChip() {
@@ -194,7 +202,7 @@ function computeMyPoints() {
   GAMES.forEach(g => {
     const placements = ((gameData[g.id] || {}).placements) || {};
     for (const p of [1, 2, 3]) {
-      if (placements[p] === teamId) total += pointsForPlacement(p, (myTeam.prios || []).includes(g.id));
+      if ((placements[p] || []).includes(teamId)) total += pointsForPlacement(p, (myTeam.prios || []).includes(g.id));
     }
   });
   return total;
@@ -283,7 +291,10 @@ function quizBody(game) {
   return html;
 }
 function answerQuiz(idx, optionIndex) {
-  db.ref('games/quiz/answers/' + idx + '/' + teamId).set(optionIndex);
+  // Nur schreiben, solange das Quiz auch wirklich aktiv ist, damit nach dem Schließen der Runde
+  // keine Antworten mehr nachträglich verändert werden können.
+  if (gameState.activeGameId !== 'quiz' || gameState.phase !== 'active') return;
+  db.ref('games/quiz/answers/' + idx + '/' + teamId).set(optionIndex).catch(console.error);
 }
 
 function tasteInput(game) {
@@ -303,7 +314,8 @@ function tasteInput(game) {
   return `<div>${slots}</div><div class="save-note">Wird direkt gespeichert, aufgedeckte Felder sind gesperrt</div>`;
 }
 function submitTasteAnswer(index, val) {
-  db.ref('games/taste/answers/' + teamId + '/' + index).set(val);
+  if (gameState.activeGameId !== 'taste' || gameState.phase !== 'active') return;
+  db.ref('games/taste/answers/' + teamId + '/' + index).set(val).catch(console.error);
 }
 
 function buzzerBody(game) {
@@ -319,13 +331,14 @@ function buzzerBody(game) {
   `;
 }
 function pressBuzzer(gameId, round) {
-  db.ref('games/' + gameId + '/rounds/' + round + '/buzzes/' + teamId).set(firebase.database.ServerValue.TIMESTAMP);
+  if (gameState.activeGameId !== gameId || gameState.phase !== 'active') return;
+  db.ref('games/' + gameId + '/rounds/' + round + '/buzzes/' + teamId).set(firebase.database.ServerValue.TIMESTAMP).catch(console.error);
 }
 
 function render() {
-  if (!myTeam) { app.innerHTML = joinScreen(); return; }
-  if (!myTeam.priosLocked) { app.innerHTML = myChip() + prioScreen(); return; }
-  app.innerHTML = liveScreen();
+  if (!myTeam) { app.innerHTML = connBadgeHtml() + joinScreen(); return; }
+  if (!myTeam.priosLocked) { app.innerHTML = connBadgeHtml() + myChip() + prioScreen(); return; }
+  app.innerHTML = connBadgeHtml() + liveScreen();
 }
 
 render();

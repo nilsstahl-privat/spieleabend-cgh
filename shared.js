@@ -96,6 +96,24 @@ if (placement === 2) return 7;
 if (placement === 3) return 5;
 return 0;
 }
+// ---------- Platzierung mit Gleichstand ----------
+// values: {teamId: zahl}. Gleiche Werte bekommen denselben Platz und damit dieselben Punkte,
+// die Teams danach rücken um die Anzahl der Gleichstand-Teams weiter (Standard-Wettkampf-Rangfolge,
+// z.B. zwei Teams teilen sich Platz 1, das nächste Team ist dann Platz 3, nicht Platz 2).
+// Gibt {1: [teamIds], 2: [teamIds], 3: [teamIds]} zurück.
+function rankedPlacements(values, higherIsBetter) {
+const entries = Object.entries(values || {}).filter(([, v]) => v !== undefined && v !== null && v !== '');
+entries.sort((a, b) => higherIsBetter ? b[1] - a[1] : a[1] - b[1]);
+const placements = { 1: [], 2: [], 3: [] };
+let rank = 0, seen = 0, prevValue = null;
+entries.forEach(([id, v]) => {
+seen++;
+if (prevValue === null || v !== prevValue) rank = seen;
+if (placements[rank]) placements[rank].push(id);
+prevValue = v;
+});
+return placements;
+}
 // ---------- Fuzzy-Vergleich für Taste Test ----------
 // Kleinschreibung, trimmen, Levenshtein-Distanz <= 3 gilt als Treffer
 function normalize(str) {

@@ -33,9 +33,12 @@
 </head>
 <body>
 <div class="layout">
-  <div>
-    <span class="eyebrow">Regie</span>
-    <h1 style="font-size: 30px;">Erobere die Christusgemeinde Hemmingen</h1>
+  <div class="row-flex" style="justify-content:space-between; align-items:flex-start;">
+    <div>
+      <span class="eyebrow">Regie</span>
+      <h1 style="font-size: 30px;">Erobere die Christusgemeinde Hemmingen</h1>
+    </div>
+    <span id="connBadge" class="small"></span>
   </div>
 
   <div class="panel">
@@ -59,6 +62,9 @@
 
   <div class="panel">
     <h2>Teams (<span id="teamCount">0</span>)</h2>
+    <div class="row-flex" style="margin-bottom:10px;">
+      <button class="ghost" onclick="resetEverything()">Alles zurücksetzen, nur zum Testen</button>
+    </div>
     <div id="teamOverview"></div>
   </div>
 
@@ -78,10 +84,28 @@ const db = firebase.database();
 let teams = {};
 let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null };
 let gameData = {};
+let connected = true;
 
 db.ref('teams').on('value', s => { teams = s.val() || {}; render(); });
 db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1 }, s.val() || {}); render(); });
 db.ref('games').on('value', s => { gameData = s.val() || {}; render(); });
+db.ref('.info/connected').on('value', s => { connected = s.val() === true; renderConnBadge(); });
+
+function renderConnBadge() {
+  const el = document.getElementById('connBadge');
+  if (!el) return;
+  el.textContent = connected ? '● verbunden' : '● keine Verbindung';
+  el.style.color = connected ? '#2E7D74' : '#B24C63';
+  el.style.fontWeight = '800';
+}
+
+function resetEverything() {
+  if (!confirm('Wirklich ALLES zurücksetzen? Alle Teams und Spielstände werden gelöscht, das lässt sich nicht rückgängig machen.')) return;
+  if (!confirm('Ganz sicher? Das ist nur zum Testen vor dem echten Abend gedacht.')) return;
+  db.ref('teams').remove();
+  db.ref('games').remove();
+  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false });
+}
 
 function setGameState(patch) { db.ref('gameState').update(patch); }
 function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false }); }
@@ -92,10 +116,10 @@ function setPhase(phase) {
 function autoApplyPlacementsForActiveGame() {
   const game = gameById(gameState.activeGameId);
   if (!game) return;
-  if (game.type === 'quiz') applyPlacements('quiz', teamRankedByValue(quizScores(), true));
-  else if (game.type === 'buzzer') applyPlacements(game.id, teamRankedByValue(totalInternalPoints(game), true));
-  else if (game.type === 'value') applyPlacements(game.id, teamRankedByValue(((gameData[game.id] || {}).values) || {}, game.higherIsBetter));
-  else if (game.type === 'race') applyPlacements(game.id, teamRankedByValue(((gameData[game.id] || {}).values) || {}, false));
+  if (game.type === 'quiz') applyPlacements('quiz', quizScores(), true);
+  else if (game.type === 'buzzer') applyPlacements(game.id, totalInternalPoints(game), true);
+  else if (game.type === 'value') applyPlacements(game.id, ((gameData[game.id] || {}).values) || {}, game.higherIsBetter);
+  else if (game.type === 'race') applyPlacements(game.id, ((gameData[game.id] || {}).values) || {}, false);
   else if (game.type === 'taste') applyTastePlacements(game.id);
   // "manual" (Dreibein) wird bewusst nicht automatisch überschrieben, die Regie wählt dort direkt
 }
@@ -177,22 +201,16 @@ function renderGameControlPanel() {
   panel.innerHTML = html;
 }
 
-function teamRankedByValue(values, higherIsBetter) {
-  // values: {teamId: number}
-  return Object.entries(values)
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .sort((a, b) => higherIsBetter ? b[1] - a[1] : a[1] - b[1])
-    .map(([id]) => id);
-}
-function applyPlacements(gameId, orderedTeamIds) {
-  const placements = {};
-  orderedTeamIds.slice(0, 3).forEach((id, i) => { placements[i + 1] = id; });
-  db.ref('games/' + gameId + '/placements').set(placements);
+function applyPlacements(gameId, values, higherIsBetter) {
+  db.ref('games/' + gameId + '/placements').set(rankedPlacements(values, higherIsBetter));
 }
 function currentPlacementsView(gameId) {
   const placements = ((gameData[gameId] || {}).placements) || {};
   const labels = ['🥇', '🥈', '🥉'];
-  return [1, 2, 3].map(p => placements[p] ? `${labels[p - 1]} ${escapeHtml((teams[placements[p]] || {}).name || '?')}` : `${labels[p - 1]} –`).join('&nbsp;&nbsp;');
+  return [1, 2, 3].map(p => {
+    const names = (placements[p] || []).map(id => escapeHtml((teams[id] || {}).name || '?'));
+    return `${labels[p - 1]} ${names.length ? names.join(' &amp; ') : '–'}`;
+  }).join('&nbsp;&nbsp;');
 }
 
 function quizScores() {
@@ -227,7 +245,7 @@ function quizPanel(game) {
     </div>
     <table><thead><tr><th>Team</th><th>Fortschritt</th></tr></thead><tbody>${progressRows || `<tr><td colspan="2" class="small">Noch keine Teams.</td></tr>`}</tbody></table>
     <div class="row-flex" style="margin-top:12px;">
-      <button onclick="applyPlacements('quiz', teamRankedByValue(quizScores(), true))">Gesamtplatzierung übernehmen</button>
+      <button onclick="applyPlacements('quiz', quizScores(), true)">Gesamtplatzierung übernehmen</button>
       <span class="small">${currentPlacementsView('quiz')}</span>
     </div>
     ${quizScoreTable()}
@@ -250,7 +268,7 @@ function valuePanel(game) {
   return `
     <table><thead><tr><th>Team</th><th>${escapeHtml(game.valueLabel)}</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="row-flex" style="margin-top:12px;">
-      <button onclick="applyPlacements('${game.id}', teamRankedByValue((gameData.${game.id}||{}).values || {}, ${game.higherIsBetter}))">Platzierung übernehmen</button>
+      <button onclick="applyPlacements('${game.id}', (gameData.${game.id}||{}).values || {}, ${game.higherIsBetter})">Platzierung übernehmen</button>
       <span class="small">${currentPlacementsView(game.id)}</span>
     </div>
   `;
@@ -258,12 +276,12 @@ function valuePanel(game) {
 
 function manualPanel(game) {
   const placements = ((gameData[game.id] || {}).placements) || {};
-  const opts = id => Object.entries(teams).map(([tid, t]) => `<option value="${tid}" ${placements[id] === tid ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+  const opts = id => Object.entries(teams).map(([tid, t]) => `<option value="${tid}" ${(placements[id] || []).includes(tid) ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
   return `
     <div class="row-flex">
-      🥇 <select onchange="db.ref('games/${game.id}/placements/1').set(this.value)"><option value="">–</option>${opts(1)}</select>
-      🥈 <select onchange="db.ref('games/${game.id}/placements/2').set(this.value)"><option value="">–</option>${opts(2)}</select>
-      🥉 <select onchange="db.ref('games/${game.id}/placements/3').set(this.value)"><option value="">–</option>${opts(3)}</select>
+      🥇 <select onchange="db.ref('games/${game.id}/placements/1').set(this.value ? [this.value] : [])"><option value="">–</option>${opts(1)}</select>
+      🥈 <select onchange="db.ref('games/${game.id}/placements/2').set(this.value ? [this.value] : [])"><option value="">–</option>${opts(2)}</select>
+      🥉 <select onchange="db.ref('games/${game.id}/placements/3').set(this.value ? [this.value] : [])"><option value="">–</option>${opts(3)}</select>
     </div>
   `;
 }
@@ -298,7 +316,6 @@ function racePanel(game) {
     </div>
   `).join('');
 
-  const rankedAll = teamRankedByValue(times, false);
   const overview = Object.entries(teams).map(([id, t]) => `
     <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td><td>${times[id] != null ? times[id] + ' s' : '–'}</td></tr>
   `).join('');
@@ -324,7 +341,7 @@ function stopLane(teamId, gameId) {
 }
 function autoApplyRacePlacements(gameId) {
   const values = ((gameData[gameId] || {}).values) || {};
-  applyPlacements(gameId, teamRankedByValue(values, false));
+  applyPlacements(gameId, values, false);
 }
 
 function tastePanel(game) {
@@ -390,7 +407,7 @@ function applyTastePlacements(gameId) {
     }
     counts[id] = count;
   });
-  applyPlacements(gameId, teamRankedByValue(counts, true));
+  applyPlacements(gameId, counts, true);
 }
 
 function roundPoints(game, round) {
@@ -469,7 +486,7 @@ function buzzerPanel(game) {
     ${roundPtsHtml}
     ${totalsHtml}
     <div class="row-flex" style="margin-top:12px;">
-      <button onclick="applyPlacements('${game.id}', teamRankedByValue(totalInternalPoints(gameById('${game.id}')), true))">Gesamtplatzierung übernehmen</button>
+      <button onclick="applyPlacements('${game.id}', totalInternalPoints(gameById('${game.id}')), true)">Gesamtplatzierung übernehmen</button>
       <span class="small">${currentPlacementsView(game.id)}</span>
     </div>
   `;
@@ -485,11 +502,12 @@ function computeLeaderboard() {
   GAMES.forEach(g => {
     const placements = ((gameData[g.id] || {}).placements) || {};
     [1, 2, 3].forEach(p => {
-      const id = placements[p];
-      if (id && teams[id]) {
-        const isPrio = (teams[id].prios || []).includes(g.id);
-        totals[id] = (totals[id] || 0) + pointsForPlacement(p, isPrio);
-      }
+      (placements[p] || []).forEach(id => {
+        if (teams[id]) {
+          const isPrio = (teams[id].prios || []).includes(g.id);
+          totals[id] = (totals[id] || 0) + pointsForPlacement(p, isPrio);
+        }
+      });
     });
   });
   return Object.entries(totals).sort((a, b) => b[1] - a[1]);
@@ -506,6 +524,7 @@ function renderLeaderboard() {
 }
 
 function render() {
+  renderConnBadge();
   renderGameGrid();
   renderPhaseRow();
   renderTeamOverview();

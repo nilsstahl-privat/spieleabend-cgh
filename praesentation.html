@@ -173,8 +173,9 @@ function leaderboardView() {
   GAMES.forEach(g => {
     const placements = ((gameData[g.id] || {}).placements) || {};
     [1, 2, 3].forEach(p => {
-      const id = placements[p];
-      if (id && teams[id]) totals[id] = (totals[id] || 0) + pointsForPlacement(p, (teams[id].prios || []).includes(g.id));
+      (placements[p] || []).forEach(id => {
+        if (teams[id]) totals[id] = (totals[id] || 0) + pointsForPlacement(p, (teams[id].prios || []).includes(g.id));
+      });
     });
   });
   const ranked = Object.entries(totals).sort((a, b) => b[1] - a[1]);
