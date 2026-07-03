@@ -27,6 +27,15 @@ const TEAM_COLORS = [
 { id: "taupe-dark", hex: "#8C7B68", label: "Braun" },
 { id: "teal-light", hex: "#A9DBD9", label: "Hellteal" },
 ];
+// ---------- Taste Test Lebensmittel ----------
+// Platzhalter, Nils schickt die echten Lebensmittel noch, dann hier ersetzen.
+const TASTE_FOODS = [
+"Lebensmittel 1 (Platzhalter)",
+"Lebensmittel 2 (Platzhalter)",
+"Lebensmittel 3 (Platzhalter)",
+"Lebensmittel 4 (Platzhalter)",
+"Lebensmittel 5 (Platzhalter)",
+];
 // ---------- Quiz-Fragen, digital ----------
 const QUIZ_QUESTIONS = [
 { category: "B.A. Evangelische Theologie", text: "Wie viele Deutsche lesen täglich die Bibel?", options: ["5 %", "1 %", "2 %", "10 %"], correct: 2 },
@@ -74,7 +83,7 @@ type: "buzzer", rounds: 3, roundSeconds: 120,
 },
 {
 id: "bobby", name: "Bobby-Car-Rennen", sub: "Kinderraum", accent: "#C77B2E", soft: "#FBEEE0",
-rule: "Fahrt den Rundkurs so schnell wie möglich.", type: "race", lanes: 3,
+rule: "Fahrt den Rundkurs so schnell wie möglich, ein Team nach dem anderen.", type: "race",
 },
 {
 id: "dreibein", name: "Dreibein bauen", sub: "Technik", accent: "#34506B", soft: "#E5EAEF",
@@ -85,9 +94,38 @@ type: "manual", videoUrl: "dreibein-video.mp4", videoRate: 1,
 id: "songs", name: "KI-Songs erraten", sub: "Lobpreisteam", accent: "#C79A3D", soft: "#FBF3E0",
 rule: "Hört gut zu. Drückt den Buzzer, sobald ihr das Original erkennt, aber erst wenn das Lied zu Ende ist, wird ausgewertet.",
 type: "buzzer", rounds: 3, roundSeconds: null, roundLabel: "Lied",
+// Von Klaus Göttler textlich mit KI umgedichtete und neu vertonte Lobpreislieder, eins pro Runde.
+songs: [
+{ title: "Neues Leben", url: "https://cdn1.suno.ai/1d20b8a3-f1cd-4290-a008-deb8b97e58cc.mp3" },
+{ title: "Ich glaube", url: "https://cdn1.suno.ai/857405bc-9a09-4a6f-ba48-334c84c9d532.mp3" },
+{ title: "Leuchtturm", url: "https://cdn1.suno.ai/ef3b35ef-bb4c-4c94-943d-3d84bcca50d1.mp3" },
+],
 },
 ];
 function gameById(id) { return GAMES.find(g => g.id === id) || null; }
+// ---------- Zufalls-Gruppen ----------
+function shuffleArray(arr) {
+const a = arr.slice();
+for (let i = a.length - 1; i > 0; i--) {
+const j = Math.floor(Math.random() * (i + 1));
+const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+}
+return a;
+}
+// Teilt eine zufällig gemischte Liste in Gruppen einer festen Größe auf, letzte Gruppe kann kleiner sein.
+function groupsBySize(ids, size) {
+const shuffled = shuffleArray(ids);
+const groups = [];
+for (let i = 0; i < shuffled.length; i += size) groups.push(shuffled.slice(i, i + size));
+return groups;
+}
+// Teilt eine zufällig gemischte Liste möglichst gleichmäßig in eine feste Anzahl Gruppen auf.
+function groupsByCount(ids, count) {
+const shuffled = shuffleArray(ids);
+const groups = Array.from({ length: count }, () => []);
+shuffled.forEach((id, i) => groups[i % count].push(id));
+return groups;
+}
 // ---------- Punktelogik ----------
 // placement: 1, 2 oder 3. isPrio: true/false
 function pointsForPlacement(placement, isPrio) {

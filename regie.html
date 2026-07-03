@@ -45,6 +45,7 @@
     <h2>Bühne steuern</h2>
     <div class="grid-2" id="gameGrid"></div>
     <div class="phase-row" id="phaseRow"></div>
+    <div class="row-flex" id="releaseRow" style="margin-top:12px;"></div>
   </div>
 
   <div class="panel">
@@ -82,12 +83,12 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 let teams = {};
-let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null };
+let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, teamsReleased: false };
 let gameData = {};
 let connected = true;
 
 db.ref('teams').on('value', s => { teams = s.val() || {}; render(); });
-db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1 }, s.val() || {}); render(); });
+db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false }, s.val() || {}); render(); });
 db.ref('games').on('value', s => { gameData = s.val() || {}; render(); });
 db.ref('.info/connected').on('value', s => { connected = s.val() === true; renderConnBadge(); });
 
@@ -104,14 +105,24 @@ function resetEverything() {
   if (!confirm('Ganz sicher? Das ist nur zum Testen vor dem echten Abend gedacht.')) return;
   db.ref('teams').remove();
   db.ref('games').remove();
-  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false });
+  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false, teamsReleased: false });
 }
 
 function setGameState(patch) { db.ref('gameState').update(patch); }
-function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false }); }
+// Neue Box ausgewählt: Handys bleiben bewusst auf dem Holding Screen, bis explizit freigegeben wird.
+function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false }); }
 function setPhase(phase) {
   setGameState({ phase });
   if (phase === 'closed') autoApplyPlacementsForActiveGame();
+}
+function renderReleaseButton() {
+  const el = document.getElementById('releaseRow');
+  if (!el) return;
+  const released = !!gameState.teamsReleased;
+  el.innerHTML = `
+    <button class="${released ? 'ghost' : ''}" onclick="setGameState({teamsReleased: ${released ? 'false' : 'true'}})">${released ? 'Handys wieder sperren' : 'Jetzt auf den Handys freigeben'}</button>
+    <span class="small">${released ? 'Teams sehen den aktuellen Inhalt.' : 'Teams sehen einen Warte-Screen, bis du freigibst.'}</span>
+  `;
 }
 function autoApplyPlacementsForActiveGame() {
   const game = gameById(gameState.activeGameId);
@@ -259,25 +270,91 @@ function quizScoreTable() {
   return `<div class="small" style="margin-top:14px;">Live-Punktestand:</div><table><thead><tr><th>Team</th><th>Richtige Antworten</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+// ---------- Sichtbare Zufallsauslosung ----------
+// Setzt kurz "drawing: true" (die Präsentation zeigt dazu eine Zufalls-Animation), erst danach
+// wird das eigentliche Ergebnis geschrieben, damit alle sehen, dass wirklich zufällig ausgelost wird.
+function runDraw(gameId, computeFn) {
+  db.ref('games/' + gameId + '/drawing').set(true);
+  setTimeout(() => {
+    const patch = computeFn();
+    patch.drawing = false;
+    db.ref('games/' + gameId).update(patch);
+  }, 2500);
+}
+
 function valuePanel(game) {
-  const values = ((gameData[game.id] || {}).values) || {};
-  const rows = Object.entries(teams).map(([id, t]) => `
-    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td>
+  const g = gameData[game.id] || {};
+  const values = g.values || {};
+  const groups = g.groups || [];
+  const groupIndex = g.currentGroupIndex || 0;
+  const drawing = !!g.drawing;
+
+  if (!groups.length) {
+    return `
+      <div class="small" style="margin-bottom:10px;">Noch keine Dreier-Gruppen ausgelost, immer drei Teams testen gleichzeitig.</div>
+      <button ${drawing ? 'disabled' : ''} onclick="drawValueGroups('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Gruppen auslosen, je 3 Teams'}</button>
+    `;
+  }
+
+  const isDone = groupIndex >= groups.length;
+  const currentGroup = groups[groupIndex] || [];
+  const groupNav = `
+    <div class="row-flex" style="margin-bottom:10px; justify-content:space-between;">
+      <span class="small">${isDone ? 'Alle Gruppen sind getestet.' : `Gruppe ${groupIndex + 1} von ${groups.length} ist dran`}</span>
+      <div class="row-flex">
+        <button class="ghost" onclick="db.ref('games/${game.id}/currentGroupIndex').set(Math.max(0, ${groupIndex} - 1))">Zurück</button>
+        <button class="ghost" onclick="db.ref('games/${game.id}/currentGroupIndex').set(Math.min(${groups.length}, ${groupIndex} + 1))">Nächste Gruppe</button>
+        <button class="ghost" ${drawing ? 'disabled' : ''} onclick="if (confirm('Gruppen neu auslosen? Bereits eingetragene Werte bleiben erhalten.')) drawValueGroups('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Neu auslosen'}</button>
+      </div>
+    </div>
+  `;
+  const currentRows = currentGroup.map(id => { const t = teams[id] || {}; return `
+    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name || '')}</td>
     <td><input type="number" style="width:90px;" value="${values[id] != null ? values[id] : ''}" onchange="db.ref('games/${game.id}/values/${id}').set(parseFloat(this.value)||0)"></td></tr>
+  `; }).join('');
+  const allRows = Object.entries(teams).map(([id, t]) => `
+    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td><td>${values[id] != null ? values[id] : '–'}</td></tr>
   `).join('');
+
   return `
-    <table><thead><tr><th>Team</th><th>${escapeHtml(game.valueLabel)}</th></tr></thead><tbody>${rows}</tbody></table>
+    ${groupNav}
+    <table><thead><tr><th>Aktuelle Gruppe</th><th>${escapeHtml(game.valueLabel)}</th></tr></thead><tbody>${currentRows || `<tr><td colspan="2" class="small">Keine Teams in dieser Gruppe.</td></tr>`}</tbody></table>
+    <div class="small" style="margin-top:14px; font-weight:800;">Alle Teams:</div>
+    <table><thead><tr><th>Team</th><th>${escapeHtml(game.valueLabel)}</th></tr></thead><tbody>${allRows}</tbody></table>
     <div class="row-flex" style="margin-top:12px;">
       <button onclick="applyPlacements('${game.id}', (gameData.${game.id}||{}).values || {}, ${game.higherIsBetter})">Platzierung übernehmen</button>
       <span class="small">${currentPlacementsView(game.id)}</span>
     </div>
   `;
 }
+function drawValueGroups(gameId) {
+  runDraw(gameId, () => ({ groups: groupsBySize(Object.keys(teams), 3), currentGroupIndex: 0 }));
+}
 
 function manualPanel(game) {
-  const placements = ((gameData[game.id] || {}).placements) || {};
+  const g = gameData[game.id] || {};
+  const groups = g.groups || [];
+  const groupIndex = g.currentGroupIndex || 0;
+  const placements = g.placements || {};
+  const drawing = !!g.drawing;
+
+  const groupsBlock = !groups.length ? `
+    <div class="small" style="margin-bottom:10px;">Noch keine Gruppen ausgelost. Wegen begrenztem Material baut jeweils nur eine Gruppe gleichzeitig, in zwei Runden nacheinander.</div>
+    <button ${drawing ? 'disabled' : ''} onclick="drawManualGroups('${game.id}')">${drawing ? 'Wird ausgelost…' : 'In 2 Gruppen auslosen'}</button>
+  ` : `
+    <div class="row-flex" style="margin-bottom:10px; justify-content:space-between;">
+      <span class="small">${groupIndex >= groups.length ? 'Beide Gruppen sind gebaut.' : `Gruppe ${groupIndex + 1} von ${groups.length} ist dran: ` + groups[groupIndex].map(id => escapeHtml((teams[id] || {}).name || id)).join(', ')}</span>
+      <div class="row-flex">
+        <button class="ghost" onclick="db.ref('games/${game.id}/currentGroupIndex').set(Math.max(0, ${groupIndex} - 1))">Zurück</button>
+        <button class="ghost" onclick="db.ref('games/${game.id}/currentGroupIndex').set(Math.min(${groups.length}, ${groupIndex} + 1))">Nächste Gruppe</button>
+        <button class="ghost" ${drawing ? 'disabled' : ''} onclick="if (confirm('Gruppen neu auslosen?')) drawManualGroups('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Neu auslosen'}</button>
+      </div>
+    </div>
+  `;
   const opts = id => Object.entries(teams).map(([tid, t]) => `<option value="${tid}" ${(placements[id] || []).includes(tid) ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
   return `
+    ${groupsBlock}
+    <div class="small" style="margin: 12px 0 6px;">Gesamtplatzierung über beide Gruppen hinweg:</div>
     <div class="row-flex">
       🥇 <select onchange="db.ref('games/${game.id}/placements/1').set(this.value ? [this.value] : [])"><option value="">–</option>${opts(1)}</select>
       🥈 <select onchange="db.ref('games/${game.id}/placements/2').set(this.value ? [this.value] : [])"><option value="">–</option>${opts(2)}</select>
@@ -285,59 +362,79 @@ function manualPanel(game) {
     </div>
   `;
 }
+function drawManualGroups(gameId) {
+  runDraw(gameId, () => ({ groups: groupsByCount(Object.keys(teams), 2), currentGroupIndex: 0 }));
+}
 
-function raceHeats() {
-  // Teams stabil nach Anmeldezeit sortieren, dann in Dreier-Gruppen aufteilen
-  const ordered = Object.entries(teams).sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0)).map(([id]) => id);
-  const heats = [];
-  for (let i = 0; i < ordered.length; i += 3) heats.push(ordered.slice(i, i + 3));
-  return heats;
+function drawRaceOrder(gameId) {
+  runDraw(gameId, () => ({ order: shuffleArray(Object.keys(teams)), currentIndex: 0 }));
+}
+
+function raceTimeLeaderboard(times) {
+  const ranked = Object.entries(times)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .sort((a, b) => a[1] - b[1]);
+  return `
+    <table style="margin-top:10px;"><thead><tr><th>#</th><th>Team</th><th>Zeit</th></tr></thead><tbody>
+      ${ranked.map(([id, t], i) => `
+        <tr><td>${i + 1}</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>${escapeHtml((teams[id] || {}).name || id)}</td><td>${t} s</td></tr>
+      `).join('') || '<tr><td colspan="3" class="small">Noch keine Zeiten.</td></tr>'}
+    </tbody></table>
+  `;
 }
 
 function racePanel(game) {
-  const times = ((gameData[game.id] || {}).values) || {};
-  const heats = raceHeats();
-  const heatIndex = window._raceHeatIndex = (window._raceHeatIndex == null ? 0 : window._raceHeatIndex);
-  const heat = heats[heatIndex] || [];
-  const isFinal = heatIndex === heats.length - 1;
+  const g = (gameData[game.id] || {});
+  const times = g.values || {};
+  const order = g.order || [];
+  const currentIndex = g.currentIndex || 0;
+  const drawing = !!g.drawing;
 
-  const heatButtons = heats.map((h, i) => `
-    <button class="ghost ${i === heatIndex ? 'active' : ''}" onclick="window._raceHeatIndex=${i}; render();">
-      ${i === heats.length - 1 && heats.length > 1 ? 'Finale' : 'Runde ' + (i + 1)}
-    </button>
-  `).join('');
+  if (!order.length) {
+    return `
+      <div class="small" style="margin-bottom:10px;">Noch keine Reihenfolge ausgelost, jedes Team fährt einzeln, Reihenfolge wird zufällig bestimmt.</div>
+      <button ${drawing ? 'disabled' : ''} onclick="drawRaceOrder('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Reihenfolge auslosen'}</button>
+    `;
+  }
 
-  const laneRows = heat.map(id => `
-    <div class="row-flex">
-      <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
-      <span style="min-width:140px;">${escapeHtml((teams[id] || {}).name || '')}</span>
-      <button class="ghost" onclick="stopLane('${id}', '${game.id}')">Stopp</button>
-      <span class="small">${times[id] != null ? times[id] + ' s' : '–'}</span>
-    </div>
-  `).join('');
+  const isDone = currentIndex >= order.length;
+  const currentTeamId = order[currentIndex];
+  const currentTeam = teams[currentTeamId] || {};
 
-  const overview = Object.entries(teams).map(([id, t]) => `
-    <tr><td><span class="dot" style="background:${teamColor(t)};"></span>${escapeHtml(t.name)}</td><td>${times[id] != null ? times[id] + ' s' : '–'}</td></tr>
-  `).join('');
-
-  return `
-    <div class="row-flex" style="margin-bottom:10px; flex-wrap:wrap;">${heatButtons}</div>
+  const currentHtml = isDone ? `
+    <div class="small" style="margin-bottom:10px;">Alle ${order.length} Teams sind gefahren.</div>
+  ` : `
     <div class="row-flex" style="margin-bottom:10px;">
-      <span style="font-weight:800;">${isFinal && heats.length > 1 ? 'Finale' : 'Runde ' + (heatIndex + 1)}</span>
+      <span class="dot" style="background:${teamColor(currentTeam)};"></span>
+      <span style="font-weight:800;">${escapeHtml(currentTeam.name || '')}</span>
+      <span class="small">ist dran, Team ${currentIndex + 1} von ${order.length}</span>
+    </div>
+    <div class="row-flex">
       <button onclick="startRace()">Start</button>
+      <button class="ghost" onclick="stopLane('${currentTeamId}', '${game.id}', ${currentIndex})">Stopp</button>
       <span class="small" id="raceStartInfo">${window._raceStart ? 'Läuft…' : 'Nicht gestartet'}</span>
     </div>
-    ${laneRows || '<div class="small">Keine Teams in dieser Runde.</div>'}
-    <table style="margin-top:14px;"><thead><tr><th>Team</th><th>Zeit</th></tr></thead><tbody>${overview}</tbody></table>
+  `;
+
+  return `
+    <div class="row-flex" style="margin-bottom:10px; justify-content:space-between;">
+      <span class="small">Reihenfolge ist zufällig ausgelost, Teams fahren einzeln nacheinander.</span>
+      <button class="ghost" ${drawing ? 'disabled' : ''} onclick="if (confirm('Reihenfolge neu auslosen? Bereits gefahrene Zeiten bleiben erhalten.')) drawRaceOrder('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Neu auslosen'}</button>
+    </div>
+    ${currentHtml}
+    <div class="small" style="margin-top:14px; font-weight:800;">Zeit-Rangliste, live:</div>
+    ${raceTimeLeaderboard(times)}
     <div class="small" style="margin-top:10px;">Platzierung wird automatisch aus den schnellsten Zeiten berechnet, sobald genug Zeiten vorliegen.</div>
     <div class="row-flex" style="margin-top:8px;">${currentPlacementsView(game.id)}</div>
   `;
 }
 function startRace() { window._raceStart = Date.now(); render(); }
-function stopLane(teamId, gameId) {
+function stopLane(teamId, gameId, index) {
   if (!window._raceStart) { alert('Zuerst Start drücken.'); return; }
   const seconds = Math.round((Date.now() - window._raceStart) / 100) / 10;
+  window._raceStart = null;
   db.ref('games/' + gameId + '/values/' + teamId).set(seconds).then(() => autoApplyRacePlacements(gameId));
+  db.ref('games/' + gameId + '/currentIndex').set(index + 1);
 }
 function autoApplyRacePlacements(gameId) {
   const values = ((gameData[gameId] || {}).values) || {};
@@ -346,62 +443,58 @@ function autoApplyRacePlacements(gameId) {
 
 function tastePanel(game) {
   const t = gameData.taste || {};
-  const key = t.key || ['', '', '', '', ''];
   const revealedIndex = t.revealedIndex || 0;
   const answers = t.answers || {};
   const overrides = t.overrides || {};
+  const ready = t.ready || {};
 
-  const keyInputs = key.map((v, i) => `
-    <div class="taste-key-row"><span>${i + 1}.</span>
-      <input type="text" value="${escapeHtml(v)}" onchange="setTasteKey(${i}, this.value)" placeholder="Lösung ${i + 1}">
-    </div>
+  const foodList = TASTE_FOODS.map((food, i) => `
+    <div class="taste-key-row"><span>${i + 1}.</span> ${escapeHtml(food)}${i < revealedIndex ? ' <span class="small">(aufgedeckt)</span>' : ''}</div>
   `).join('');
 
   const rows = Object.entries(teams).map(([id, t2]) => {
-    const cells = [0, 1, 2, 3, 4].map(i => {
+    const cells = TASTE_FOODS.map((food, i) => {
       if (i >= revealedIndex) return `<td class="small">–</td>`;
       const guess = (answers[id] || [])[i] || '';
-      const auto = fuzzyMatch(guess, key[i]);
+      const auto = fuzzyMatch(guess, food);
       const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
       return `<td>
         ${escapeHtml(guess)} <span class="${isCorrect ? 'match-ok' : 'match-no'}">${isCorrect ? '✓' : '✗'}</span>
         <button class="ghost" style="padding:2px 6px; font-size:11px;" onclick="toggleTasteOverride('${id}', ${i}, ${!isCorrect})">${isCorrect ? 'als falsch' : 'als richtig'}</button>
       </td>`;
     }).join('');
-    return `<tr><td><span class="dot" style="background:${teamColor(t2)};"></span>${escapeHtml(t2.name)}</td>${cells}</tr>`;
+    return `<tr><td><span class="dot" style="background:${teamColor(t2)};"></span>${escapeHtml(t2.name)}${ready[id] ? ' <span class="small">(fertig)</span>' : ''}</td>${cells}</tr>`;
   }).join('');
 
   return `
-    <div class="small" style="margin-bottom:8px;">Lösung einmalig hinterlegen:</div>
-    ${keyInputs}
+    <div class="small" style="margin-bottom:8px;">Lösung, hinterlegt in shared.js, aktuell noch Platzhalter bis Nils die echten Lebensmittel schickt:</div>
+    ${foodList}
     <div class="row-flex" style="margin: 12px 0;">
-      <button onclick="revealNextTaste()">Nächstes Lebensmittel aufdecken (${revealedIndex}/5)</button>
+      <button onclick="revealNextTaste()">Nächstes Lebensmittel aufdecken (${revealedIndex}/${TASTE_FOODS.length})</button>
     </div>
-    <table><thead><tr><th>Team</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>Team</th>${TASTE_FOODS.map((_, i) => `<th>${i + 1}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
     <div class="row-flex" style="margin-top:12px;">
       <button onclick="applyTastePlacements('${game.id}')">Platzierung übernehmen</button>
       <span class="small">${currentPlacementsView(game.id)}</span>
     </div>
   `;
 }
-function setTasteKey(i, val) { db.ref('games/taste/key/' + i).set(val); }
 function revealNextTaste() {
   const current = (gameData.taste || {}).revealedIndex || 0;
-  if (current >= 5) return;
+  if (current >= TASTE_FOODS.length) return;
   db.ref('games/taste/revealedIndex').set(current + 1);
 }
 function toggleTasteOverride(teamId, i, value) { db.ref('games/taste/overrides/' + teamId + '_' + i).set(value); }
 function applyTastePlacements(gameId) {
   const t = gameData.taste || {};
-  const key = t.key || [];
   const answers = t.answers || {};
   const overrides = t.overrides || {};
   const counts = {};
   Object.entries(teams).forEach(([id]) => {
     let count = 0;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < TASTE_FOODS.length; i++) {
       const guess = (answers[id] || [])[i] || '';
-      const auto = fuzzyMatch(guess, key[i]);
+      const auto = fuzzyMatch(guess, TASTE_FOODS[i]);
       const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
       if (isCorrect) count++;
     }
@@ -527,6 +620,7 @@ function render() {
   renderConnBadge();
   renderGameGrid();
   renderPhaseRow();
+  renderReleaseButton();
   renderTeamOverview();
   renderGameControlPanel();
   renderLeaderboard();

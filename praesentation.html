@@ -76,10 +76,72 @@ function activeView(game) {
   if (game.type === 'taste') return tasteView(game);
   if (game.type === 'buzzer') return buzzerActiveView(game);
   if (game.type === 'quiz') return quizView(game);
+  if (game.type === 'race') return raceActiveView(game);
+  if (game.type === 'manual') return manualActiveView(game);
+  if (game.type === 'value') return valueActiveView(game);
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big">${escapeHtml(game.name)}</div>
     <div class="timer-big" id="timerBig">--:--</div>
+  `;
+}
+
+function groupStatusText(g) {
+  const groups = g.groups || [];
+  const groupIndex = g.currentGroupIndex || 0;
+  if (!groups.length) return 'Gruppen werden gleich ausgelost';
+  if (groupIndex >= groups.length) return 'Alle Gruppen sind dran gewesen';
+  const names = groups[groupIndex].map(id => escapeHtml((teams[id] || {}).name || id)).join(', ');
+  return `Gruppe ${groupIndex + 1} von ${groups.length} ist dran: ${names}`;
+}
+
+function manualActiveView(game) {
+  const g = gameData[game.id] || {};
+  return `
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big">${escapeHtml(game.name)}</div>
+    <div class="rule-big">${groupStatusText(g)}</div>
+    <div class="timer-big" id="timerBig">--:--</div>
+  `;
+}
+
+function valueActiveView(game) {
+  const g = gameData[game.id] || {};
+  const values = g.values || {};
+  const ranked = Object.entries(values).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .sort((a, b) => game.higherIsBetter ? b[1] - a[1] : a[1] - b[1]);
+  return `
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big">${escapeHtml(game.name)}</div>
+    <div class="rule-big">${groupStatusText(g)}</div>
+    <table class="wide" style="margin-top:20px;"><thead><tr><th>Platz</th><th>Team</th><th>${escapeHtml(game.valueLabel)}</th></tr></thead><tbody>
+      ${ranked.map(([id, v], i) => `
+        <tr><td>${i + 1}.</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span> ${escapeHtml((teams[id] || {}).name || '')}</td><td>${v}</td></tr>
+      `).join('') || `<tr><td colspan="3">Noch keine Werte.</td></tr>`}
+    </tbody></table>
+  `;
+}
+
+function raceActiveView(game) {
+  const g = gameData[game.id] || {};
+  const times = g.values || {};
+  const order = g.order || [];
+  const currentIndex = g.currentIndex || 0;
+  const currentTeam = teams[order[currentIndex]] || {};
+  const isDone = !order.length || currentIndex >= order.length;
+  const ranked = Object.entries(times).filter(([, v]) => v !== undefined && v !== null && v !== '').sort((a, b) => a[1] - b[1]);
+  const status = !order.length ? 'Reihenfolge wird gleich ausgelost'
+    : isDone ? 'Alle Teams sind gefahren'
+    : `${escapeHtml(currentTeam.name || '')} ist dran, Team ${currentIndex + 1} von ${order.length}`;
+  return `
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big">${escapeHtml(game.name)}</div>
+    <div class="rule-big">${status}</div>
+    <table class="wide" style="margin-top:20px;"><thead><tr><th>Platz</th><th>Team</th><th>Zeit</th></tr></thead><tbody>
+      ${ranked.map(([id, t], i) => `
+        <tr><td>${i + 1}.</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span> ${escapeHtml((teams[id] || {}).name || '')}</td><td>${t} s</td></tr>
+      `).join('') || `<tr><td colspan="3">Noch keine Zeiten.</td></tr>`}
+    </tbody></table>
   `;
 }
 
@@ -99,34 +161,59 @@ function quizView(game) {
 }
 
 function closedView(game) {
-  if (game && game.type === 'buzzer') return buzzerRevealView(game);
+  if (!game) return `<div class="title-big">Wird ausgewertet…</div>`;
+  if (game.type === 'buzzer') return buzzerRevealView(game);
+  return gameResultView(game);
+}
+
+// Rundenauswertung, zeigt Platz 1 bis 3 der aktuellen Box mit Punkten. Losgelöst von der
+// Gesamtwertung über alle Boxen, dahin wechselt die Regie danach manuell über "Rangliste zeigen".
+function gameResultView(game) {
+  const g = gameData[game.id] || {};
+  const placements = g.placements || {};
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  const rows = [1, 2, 3].flatMap(p => (placements[p] || []).map(id => ({ p, id })));
   return `
-    <div class="eyebrow-big" style="color:${game ? game.accent : ''};">${game ? escapeHtml(game.sub) : ''}</div>
-    <div class="title-big">Wird ausgewertet…</div>
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big" style="font-size: clamp(34px,5vw,60px);">Rundenauswertung</div>
+    <div class="lb-list" style="margin-top:20px;">
+      ${rows.length ? rows.map(({ p, id }) => {
+        const t = teams[id] || {};
+        const isPrio = (t.prios || []).includes(game.id);
+        const pts = pointsForPlacement(p, isPrio);
+        return `
+          <div class="lb-row ${p === 1 ? 'first' : ''}">
+            <div class="lb-rank">${medals[p]}</div>
+            <span class="dot" style="background:${teamColor(t)};"></span>
+            <div class="lb-name">${escapeHtml(t.name || '?')}</div>
+            <div class="lb-points">${pts} Pkt.</div>
+          </div>
+        `;
+      }).join('') : '<div class="rule-big">Noch keine Platzierung übernommen.</div>'}
+    </div>
   `;
 }
 
 function tasteView(game) {
   const t = gameData.taste || {};
   const revealedIndex = t.revealedIndex || 0;
-  const key = t.key || [];
   const answers = t.answers || {};
   const overrides = t.overrides || {};
-  const cols = [0, 1, 2, 3, 4];
+  const ready = t.ready || {};
   const rows = Object.entries(teams).map(([id, tm]) => {
-    const cells = cols.map(i => {
+    const cells = TASTE_FOODS.map((food, i) => {
       if (i >= revealedIndex) return `<td>?</td>`;
       const guess = (answers[id] || [])[i] || '–';
-      const auto = fuzzyMatch(guess, key[i]);
+      const auto = fuzzyMatch(guess, food);
       const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
       return `<td class="${isCorrect ? 'ok' : 'no'}">${escapeHtml(guess)}</td>`;
     }).join('');
-    return `<tr><td><span class="dot" style="background:${teamColor(tm)};"></span> ${escapeHtml(tm.name)}</td>${cells}</tr>`;
+    return `<tr><td><span class="dot" style="background:${teamColor(tm)};"></span> ${escapeHtml(tm.name)}${ready[id] ? ' ✓' : ''}</td>${cells}</tr>`;
   }).join('');
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big" style="font-size: clamp(34px, 5vw, 60px);">${escapeHtml(game.name)}</div>
-    <table class="wide"><thead><tr><th>Team</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="wide"><thead><tr><th>Team</th>${TASTE_FOODS.map((_, i) => `<th>${i + 1}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
   `;
 }
 
@@ -134,10 +221,16 @@ function buzzerActiveView(game) {
   const round = gameState.round || 1;
   const buzzes = (((gameData[game.id] || {}).rounds || {})[round] || {}).buzzes || {};
   const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
+  const song = game.songs && game.songs[round - 1];
+  const audio = song ? `
+    <audio src="${song.url}" controls autoplay style="margin-top: 24px; width: 100%; max-width: 560px;"></audio>
+    <div class="rule-big" style="font-size: clamp(14px,1.4vw,18px); margin-top:6px; opacity:0.7;">Spielt der Beamer-Ton nicht automatisch, einmal auf Play tippen.</div>
+  ` : '';
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big">${escapeHtml(game.name)}</div>
     <div class="rule-big">${label}, hört gut zu</div>
+    ${audio}
     <div class="timer-big" id="timerBig" style="font-size: clamp(40px,8vw,100px);">--:--</div>
     <div class="rule-big">${Object.keys(buzzes).length} Team${Object.keys(buzzes).length === 1 ? '' : 's'} ${Object.keys(buzzes).length === 1 ? 'hat' : 'haben'} gebuzzert</div>
   `;
@@ -160,9 +253,12 @@ function buzzerRevealView(game) {
       <span style="flex:1; text-align:left;">${i + 1}. ${escapeHtml((teams[id] || {}).name || '')}</span>
       <span>+${((ts - base) / 1000).toFixed(1)}s</span><span>${status}</span></div>`;
   }).join('');
+  const song = game.songs && game.songs[round - 1];
+  const reveal = song ? `<div class="rule-big" style="margin-top:-6px;">Das Original: <strong>${escapeHtml(song.title)}</strong></div>` : '';
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big" style="font-size: clamp(34px,5vw,60px);">Wer war zuerst?</div>
+    ${reveal}
     <div style="margin-top: 24px;">${rows || '<div class="rule-big">Niemand hat gebuzzert.</div>'}</div>
   `;
 }
@@ -195,10 +291,40 @@ function leaderboardView() {
   `;
 }
 
+// Sichtbare Zufallsauslosung: solange die aktive Box "drawing" gesetzt hat, läuft hier eine
+// Zufalls-Animation, damit alle im Raum sehen, dass die Gruppen wirklich live ausgelost werden.
+function drawingView(game) {
+  const ids = Object.keys(teams);
+  const highlightId = ids.length ? ids[Math.floor(Math.random() * ids.length)] : null;
+  const chips = ids.map(id => {
+    const t = teams[id] || {};
+    const active = id === highlightId;
+    const size = active ? 40 : 22;
+    return `<span class="dot" style="background:${teamColor(t)}; width:${size}px; height:${size}px; margin:6px; transition: all 0.1s;"></span>`;
+  }).join('');
+  return `
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big" style="font-size: clamp(34px,5vw,60px);">Wird ausgelost…</div>
+    <div style="margin-top: 30px; display:flex; justify-content:center; flex-wrap:wrap;">${chips || ''}</div>
+  `;
+}
+
 function render() {
   const game = gameById(gameState.activeGameId);
+  const g = (game && gameData[game.id]) || {};
+  const drawing = !!(game && g.drawing);
+
+  if (drawing && !window._drawInterval) {
+    window._drawInterval = setInterval(render, 120);
+  }
+  if (!drawing && window._drawInterval) {
+    clearInterval(window._drawInterval);
+    window._drawInterval = null;
+  }
+
   let html;
-  if (!game || gameState.phase === 'idle') html = idleView();
+  if (drawing) html = drawingView(game);
+  else if (!game || gameState.phase === 'idle') html = idleView();
   else if (gameState.phase === 'leaderboard') html = leaderboardView();
   else if (gameState.phase === 'rules') html = rulesView(game);
   else if (gameState.phase === 'closed') html = closedView(game);

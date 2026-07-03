@@ -77,7 +77,7 @@ if (!teamId) {
 
 let teamsSnapshot = {};
 let myTeam = null;
-let gameState = { activeGameId: null, phase: 'idle', timerEndsAt: null, timerDuration: null, round: 1 };
+let gameState = { activeGameId: null, phase: 'idle', timerEndsAt: null, timerDuration: null, round: 1, teamsReleased: false };
 let gameData = {}; // /games snapshot
 let connected = true;
 
@@ -89,7 +89,7 @@ db.ref('teams').on('value', snap => {
   render();
 });
 db.ref('gameState').on('value', snap => {
-  gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1 }, snap.val() || {});
+  gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false }, snap.val() || {});
   render();
 });
 db.ref('games').on('value', snap => {
@@ -161,10 +161,11 @@ function prioScreen() {
       <div class="eyebrow">Eure Prio-Boxen</div>
       <h2 style="margin:8px 0 4px; font-size:20px;">Wählt genau drei</h2>
       <div class="prio-count">${prios.length} / 3 gewählt, danach fest gesperrt</div>
+      <div class="small" style="text-align:center; margin-bottom:10px;">Welche Bereiche der Gemeinde sind euch am wichtigsten? Das Spiel dahinter bleibt eine Überraschung.</div>
       <div class="prio-grid">
         ${GAMES.map(g => `
           <div class="prio-btn ${prios.includes(g.id) ? 'picked' : ''}" onclick="togglePrio('${g.id}')">
-            <span>${g.name}<div class="sub">${g.sub}</div></span>
+            <span>${escapeHtml(g.sub)}</span>
             <span>${prios.includes(g.id) ? '✓' : ''}</span>
           </div>
         `).join('')}
@@ -212,7 +213,15 @@ function liveScreen() {
   const game = gameById(gameState.activeGameId);
   let body = '';
 
-  if (!game || gameState.phase === 'idle') {
+  if (!gameState.teamsReleased) {
+    // Holding Screen: die Regie muss jeden neuen Inhalt erst explizit freigeben.
+    body = `
+      <div class="panel" style="text-align:center; padding: 40px 20px;">
+        <div class="eyebrow">Wartet auf die Regie</div>
+        <div class="big-title">Gleich geht's<br>weiter …</div>
+      </div>
+    `;
+  } else if (!game || gameState.phase === 'idle') {
     body = `
       <div class="panel" style="text-align:center; padding: 40px 20px;">
         <div class="eyebrow">Wartet auf die Regie</div>
@@ -298,24 +307,38 @@ function answerQuiz(idx, optionIndex) {
 }
 
 function tasteInput(game) {
-  const answers = ((gameData.taste || {}).answers || {})[teamId] || ['', '', '', '', '', '', ''];
+  const answers = ((gameData.taste || {}).answers || {})[teamId] || [];
   const revealedIndex = (gameData.taste || {}).revealedIndex || 0;
+  const ready = !!(((gameData.taste || {}).ready || {})[teamId]);
   let slots = '';
-  for (let i = 0; i < 7; i++) {
-    const locked = i < revealedIndex;
+  for (let i = 0; i < TASTE_FOODS.length; i++) {
+    const locked = i < revealedIndex || ready;
     slots += `
       <div class="taste-slot">
         <span class="n">${i + 1}.</span>
-        <input type="text" ${locked ? 'disabled' : ''} value="${escapeHtml(answers[i] || '')}"
-          placeholder="Lebensmittel ${i + 1}" onchange="submitTasteAnswer(${i}, this.value)">
+        <input id="tasteSlot${i}" type="text" ${locked ? 'disabled' : ''} value="${escapeHtml(answers[i] || '')}"
+          placeholder="Was schmeckt ihr?" onchange="submitTasteAnswer(${i}, this.value)">
       </div>
     `;
   }
-  return `<div>${slots}</div><div class="save-note">Wird direkt gespeichert, aufgedeckte Felder sind gesperrt</div>`;
+  return `
+    <div>${slots}</div>
+    <button style="width:100%; margin-top:14px;" ${ready ? 'disabled' : ''} onclick="finishTaste('${game.id}')">${ready ? 'Abgeschickt' : 'Fertig, Antworten abschicken'}</button>
+    <div class="save-note">${ready ? 'Eure Antworten sind gespeichert.' : 'Wird laufend gespeichert, Fertig sichert auch euren letzten Eintrag.'}</div>
+  `;
 }
 function submitTasteAnswer(index, val) {
   if (gameState.activeGameId !== 'taste' || gameState.phase !== 'active') return;
   db.ref('games/taste/answers/' + teamId + '/' + index).set(val).catch(console.error);
+}
+function finishTaste(gameId) {
+  if (gameState.activeGameId !== gameId || gameState.phase !== 'active') return;
+  // Auch das Feld sichern, in dem gerade noch getippt wird, ohne dass vorher weggeklickt wurde.
+  for (let i = 0; i < TASTE_FOODS.length; i++) {
+    const el = document.getElementById('tasteSlot' + i);
+    if (el) submitTasteAnswer(i, el.value);
+  }
+  db.ref('games/taste/ready/' + teamId).set(true).catch(console.error);
 }
 
 function buzzerBody(game) {
