@@ -141,6 +141,20 @@ function setGameState(patch) { db.ref('gameState').update(patch); }
 // Neue Box ausgewählt: Handys bleiben bewusst auf dem Holding Screen, bis explizit freigegeben wird.
 function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false, numbersReveal: false, buzzOrderReveal: false }); }
 function setPhase(phase) {
+  // Bug-Fix: bei Buzzer-Spielen mit mehreren Runden (Numbers Game, KI-Songs) schließt "Spiel
+  // abschließen" sonst versehentlich das GESAMTE Spiel nach nur einer Runde. Die Rundennavigation
+  // ("Zurück"/"Nächste Runde" im Spielpanel) ändert bewusst nur games.round, nicht die Phase.
+  // Deshalb hier eine Sicherheitsabfrage, falls noch nicht alle Runden gespielt wurden.
+  if (phase === 'closed') {
+    const game = gameById(gameState.activeGameId);
+    if (game && game.type === 'buzzer' && game.rounds) {
+      const round = gameState.round || 1;
+      if (round < game.rounds) {
+        const ok = confirm('Es sind noch nicht alle Runden gespielt (Runde ' + round + ' von ' + game.rounds + '). Trotzdem das GESAMTE Spiel abschließen und die Platzierung berechnen?');
+        if (!ok) return;
+      }
+    }
+  }
   setGameState({ phase });
   if (phase === 'closed') {
     autoApplyPlacementsForActiveGame();
@@ -199,7 +213,7 @@ function renderGameGrid() {
   `).join('');
 }
 function renderPhaseRow() {
-  const phases = [['idle', 'Startbildschirm'], ['rules', 'Regeln zeigen'], ['active', 'Spiel aktiv'], ['closed', 'Runde geschlossen'], ['leaderboard', 'Rangliste zeigen'], ['rooms', 'Räume zeigen']];
+  const phases = [['idle', 'Startbildschirm'], ['rules', 'Spielname anzeigen'], ['active', 'Spiel aktiv'], ['closed', 'Spiel abschließen'], ['leaderboard', 'Rangliste zeigen'], ['rooms', 'Räume zeigen']];
   document.getElementById('phaseRow').innerHTML = phases.map(([p, label]) => `
     <button class="ghost ${gameState.phase === p ? 'active' : ''}" onclick="setPhase('${p}')">${label}</button>
   `).join('');

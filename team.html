@@ -380,6 +380,16 @@ function quizBody(game) {
       </div>
     `;
   });
+  // Jede Antwort wird zwar schon beim Anklicken sofort gespeichert, aber die Gruppen wollten eine
+  // sichtbare Bestätigung, dass ihre Abgabe wirklich angekommen ist.
+  const confirmed = !!(((gameData.quiz || {}).confirmed || {})[teamId]);
+  if (!reveal) {
+    html += confirmed ? `
+      <div style="text-align:center; margin-top:16px; font-weight:800; color:#2E7D74;">✓ Antworten gespeichert</div>
+    ` : `
+      <button style="width:100%; margin-top:16px;" onclick="saveQuiz()">Antworten speichern</button>
+    `;
+  }
   return html;
 }
 function answerQuiz(idx, optionIndex) {
@@ -387,6 +397,12 @@ function answerQuiz(idx, optionIndex) {
   // keine Antworten mehr nachträglich verändert werden können.
   if (gameState.activeGameId !== 'quiz' || gameState.phase !== 'active') return;
   db.ref('games/quiz/answers/' + idx + '/' + teamId).set(optionIndex).catch(console.error);
+  // Neue Auswahl hebt eine vorherige Bestätigung wieder auf, bis erneut gespeichert wird.
+  db.ref('games/quiz/confirmed/' + teamId).remove().catch(console.error);
+}
+function saveQuiz() {
+  if (gameState.activeGameId !== 'quiz' || gameState.phase !== 'active') return;
+  db.ref('games/quiz/confirmed/' + teamId).set(true).catch(console.error);
 }
 
 function tasteInput(game) {
@@ -462,6 +478,28 @@ function liveStatusText() {
 }
 
 function render() {
+  // Bug-Fix: tippt eine Person im Team (z.B. beim Taste Test), während eine ANDERE Person im
+  // selben Team gerade etwas speichert, kommt dadurch ein Firebase-Update rein, das die ganze
+  // Seite neu aufbaut - das hat bisher das noch nicht abgeschickte Eingabefeld mitten im Tippen
+  // geleert. Deshalb Fokus + aktueller (noch nicht gespeicherter) Wert vorher merken und danach
+  // wiederherstellen, damit niemand mehr Antworten verliert.
+  const active = document.activeElement;
+  let saved = null;
+  if (active && active.tagName === 'INPUT' && active.id) {
+    saved = { id: active.id, value: active.value, selStart: active.selectionStart, selEnd: active.selectionEnd };
+  }
+  renderInner();
+  if (saved) {
+    const el = document.getElementById(saved.id);
+    if (el && el.tagName === 'INPUT') {
+      el.value = saved.value;
+      el.focus();
+      if (el.setSelectionRange) { try { el.setSelectionRange(saved.selStart, saved.selEnd); } catch (e) {} }
+    }
+  }
+}
+
+function renderInner() {
   if (!myTeam) { app.innerHTML = connBadgeHtml() + joinScreen(); return; }
   if (!myTeam.priosLocked) {
     if (!gameState.priosReleased) {
