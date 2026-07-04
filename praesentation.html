@@ -260,12 +260,15 @@ function tasteView(game) {
   const overrides = t.overrides || {};
   const ready = t.ready || {};
   const rows = Object.entries(teams).map(([id, tm]) => {
+    const teamAnswers = (answers[id] || []);
     const cells = TASTE_FOODS.map((food, i) => {
       if (i >= revealedIndex) return `<td>?</td>`;
-      const guess = (answers[id] || [])[i] || '–';
-      const auto = fuzzyMatch(guess, food);
+      // Reihenfolge der Antworten ist egal, es zählt nur, ob das Team dieses Lebensmittel
+      // irgendwo eingetragen hat.
+      const matchedGuess = findTasteMatch(teamAnswers, food);
+      const auto = !!matchedGuess;
       const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
-      return `<td class="${isCorrect ? 'ok' : 'no'}">${escapeHtml(guess)}</td>`;
+      return `<td class="${isCorrect ? 'ok' : 'no'}">${escapeHtml(matchedGuess || (isCorrect ? '✓' : '–'))}</td>`;
     }).join('');
     return `<tr><td><span class="dot" style="background:${teamColor(tm)};"></span> ${escapeHtml(tm.name)}${ready[id] ? ' ✓' : ''}</td>${cells}</tr>`;
   }).join('');

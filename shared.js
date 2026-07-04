@@ -179,6 +179,16 @@ function fuzzyMatch(guess, answer) {
 if (!guess || !answer) return false;
 return levenshtein(guess, answer) <= 3;
 }
+// Findet, welche der freien Antworten eines Teams zu einem bestimmten Lebensmittel passt,
+// unabhängig davon, in welches der Felder das Team es eingetragen hat (Reihenfolge egal,
+// Hauptsache es steht irgendwo drin).
+function findTasteMatch(answers, food) {
+const list = answers || [];
+for (let i = 0; i < list.length; i++) {
+if (list[i] && fuzzyMatch(list[i], food)) return list[i];
+}
+return '';
+}
 function escapeHtml(str) {
 const div = document.createElement('div');
 div.textContent = str == null ? '' : String(str);

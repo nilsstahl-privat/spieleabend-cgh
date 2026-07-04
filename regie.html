@@ -638,21 +638,25 @@ function tastePanel(game) {
   `).join('');
 
   const rows = Object.entries(teams).map(([id, t2]) => {
+    const teamAnswers = answers[id] || [];
     const cells = TASTE_FOODS.map((food, i) => {
       if (i >= revealedIndex) return `<td class="small">–</td>`;
-      const guess = (answers[id] || [])[i] || '';
-      const auto = fuzzyMatch(guess, food);
+      // Reihenfolge ist egal: es zählt, ob das Team dieses Lebensmittel irgendwo in seinen
+      // Antworten stehen hat, nicht an welcher Stelle.
+      const matchedGuess = findTasteMatch(teamAnswers, food);
+      const auto = !!matchedGuess;
       const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
       return `<td>
-        ${escapeHtml(guess)} <span class="${isCorrect ? 'match-ok' : 'match-no'}">${isCorrect ? '✓' : '✗'}</span>
+        ${escapeHtml(matchedGuess || (isCorrect ? '(manuell)' : ''))} <span class="${isCorrect ? 'match-ok' : 'match-no'}">${isCorrect ? '✓' : '✗'}</span>
         <button class="ghost" style="padding:2px 6px; font-size:11px;" onclick="toggleTasteOverride('${id}', ${i}, ${!isCorrect})">${isCorrect ? 'als falsch' : 'als richtig'}</button>
       </td>`;
     }).join('');
-    return `<tr><td><span class="dot" style="background:${teamColor(t2)};"></span>${escapeHtml(t2.name)}${ready[id] ? ' <span class="small">(fertig)</span>' : ''}</td>${cells}</tr>`;
+    const allGuesses = teamAnswers.filter(Boolean).join(', ') || '–';
+    return `<tr><td><span class="dot" style="background:${teamColor(t2)};"></span>${escapeHtml(t2.name)}${ready[id] ? ' <span class="small">(fertig)</span>' : ''}<div class="small">Alle Antworten: ${escapeHtml(allGuesses)}</div></td>${cells}</tr>`;
   }).join('');
 
   return `
-    <div class="small" style="margin-bottom:8px;">Lösung, hinterlegt in shared.js, aktuell noch Platzhalter bis Nils die echten Lebensmittel schickt:</div>
+    <div class="small" style="margin-bottom:8px;">Lösung, hinterlegt in shared.js. Die Reihenfolge der Antworten ist egal, es zählt nur, ob ein Team ein Lebensmittel irgendwo eingetragen hat.</div>
     ${foodList}
     <div class="row-flex" style="margin: 12px 0;">
       <button onclick="revealNextTaste()">Nächstes Lebensmittel aufdecken (${revealedIndex}/${TASTE_FOODS.length})</button>
@@ -676,10 +680,12 @@ function applyTastePlacements(gameId) {
   const overrides = t.overrides || {};
   const counts = {};
   Object.entries(teams).forEach(([id]) => {
+    const teamAnswers = answers[id] || [];
     let count = 0;
     for (let i = 0; i < TASTE_FOODS.length; i++) {
-      const guess = (answers[id] || [])[i] || '';
-      const auto = fuzzyMatch(guess, TASTE_FOODS[i]);
+      // Reihenfolge egal: zählt als richtig, wenn das Lebensmittel irgendwo in den
+      // Antworten des Teams vorkommt.
+      const auto = !!findTasteMatch(teamAnswers, TASTE_FOODS[i]);
       const isCorrect = overrides[id + '_' + i] !== undefined ? overrides[id + '_' + i] : auto;
       if (isCorrect) count++;
     }
