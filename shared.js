@@ -28,13 +28,12 @@ const TEAM_COLORS = [
 { id: "teal-light", hex: "#A9DBD9", label: "Hellteal" },
 ];
 // ---------- Taste Test Lebensmittel ----------
-// Platzhalter, Nils schickt die echten Lebensmittel noch, dann hier ersetzen.
 const TASTE_FOODS = [
-"Lebensmittel 1 (Platzhalter)",
-"Lebensmittel 2 (Platzhalter)",
-"Lebensmittel 3 (Platzhalter)",
-"Lebensmittel 4 (Platzhalter)",
-"Lebensmittel 5 (Platzhalter)",
+"Erdbeere",
+"Mozzarella",
+"Tomate",
+"Nutella",
+"Erdnüsse",
 ];
 // ---------- Quiz-Fragen, digital ----------
 const QUIZ_QUESTIONS = [
@@ -78,8 +77,13 @@ type: "taste",
 },
 {
 id: "numbers", name: "Numbers Game", sub: "Spenden", accent: "#6B4FA0", soft: "#EEE8F5",
-rule: "Erreicht die Zielzahl mit den sechs Zahlen. Drückt den Buzzer, sobald ihr die Lösung habt.",
+rule: "Erreicht die Zielzahl mit den sechs Zahlen. Nicht alle Zahlen müssen benutzt werden, jede Zahl nur einmal, Zwischenergebnisse keine negativen Zahlen oder Brüche. Drückt den Buzzer, sobald ihr die Lösung habt.",
 type: "buzzer", rounds: 3, roundSeconds: 120,
+numbersRounds: [
+{ numbers: [50, 8, 3, 7, 2, 10], target: 556, solution: "(50 × 10) + (8 × 7) = 556" },
+{ numbers: [100, 2, 7, 10, 8, 5], target: 701, solution: "7 × 100 = 700, 10 ÷ 2 = 5, 5 ÷ 5 = 1, 700 + 1 = 701" },
+{ numbers: [3, 5, 7, 4, 8, 9], target: 570, solution: "8 + 4 + 7 = 19, (9 − 3) × 19 = 114, 114 × 5 = 570" },
+],
 },
 {
 id: "bobby", name: "Bobby-Car-Rennen", sub: "Kinderraum", accent: "#C77B2E", soft: "#FBEEE0",

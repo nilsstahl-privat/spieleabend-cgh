@@ -29,6 +29,13 @@
   .lb-row.first { background: var(--yellow-soft); border-color: var(--yellow); }
   .small { font-size: 12px; color: var(--ink-soft); }
   select { padding: 8px; }
+  .status-tile { background: white; border: 2px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .status-tile .name { display:block; font-weight: 800; font-size: 13px; margin-bottom: 2px; }
+  .status-tile .status { font-size: 12px; color: var(--ink-soft); }
+  .room-tile { background: white; border: 2px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .room-tile.done { opacity: 0.5; }
+  .room-tile .name { display:block; font-weight: 800; font-size: 13px; }
+  .room-tile .sub { font-weight: 400; font-size: 11px; color: var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -65,8 +72,23 @@
     <h2>Teams (<span id="teamCount">0</span>)</h2>
     <div class="row-flex" style="margin-bottom:10px;">
       <button class="ghost" onclick="resetEverything()">Alles zurücksetzen, nur zum Testen</button>
+      <button class="ghost" id="prioReleaseBtn" onclick="togglePriosReleased()"></button>
     </div>
     <div id="teamOverview"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Team-Displays, live Vorschau</h2>
+    <div class="grid-2" id="teamStatusGrid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Räume-Übersicht</h2>
+    <div class="row-flex" style="margin-bottom:10px;">
+      <button onclick="startNextRoundPick()">Nächste Runde, Gruppe auslosen</button>
+    </div>
+    <div id="pickerStatus"></div>
+    <div id="roomsGrid" class="grid-2"></div>
   </div>
 
   <div class="panel">
@@ -83,12 +105,12 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 let teams = {};
-let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, teamsReleased: false };
+let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] };
 let gameData = {};
 let connected = true;
 
 db.ref('teams').on('value', s => { teams = s.val() || {}; render(); });
-db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false }, s.val() || {}); render(); });
+db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] }, s.val() || {}); render(); });
 db.ref('games').on('value', s => { gameData = s.val() || {}; render(); });
 db.ref('.info/connected').on('value', s => { connected = s.val() === true; renderConnBadge(); });
 
@@ -105,15 +127,25 @@ function resetEverything() {
   if (!confirm('Ganz sicher? Das ist nur zum Testen vor dem echten Abend gedacht.')) return;
   db.ref('teams').remove();
   db.ref('games').remove();
-  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false, teamsReleased: false });
+  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] });
+}
+function togglePriosReleased() { setGameState({ priosReleased: !gameState.priosReleased }); }
+function renderPrioReleaseButton() {
+  const el = document.getElementById('prioReleaseBtn');
+  if (!el) return;
+  const released = !!gameState.priosReleased;
+  el.textContent = released ? 'Priorisierung wieder sperren' : 'Priorisierung freigeben';
 }
 
 function setGameState(patch) { db.ref('gameState').update(patch); }
 // Neue Box ausgewählt: Handys bleiben bewusst auf dem Holding Screen, bis explizit freigegeben wird.
-function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false }); }
+function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false, numbersReveal: false }); }
 function setPhase(phase) {
   setGameState({ phase });
-  if (phase === 'closed') autoApplyPlacementsForActiveGame();
+  if (phase === 'closed') {
+    autoApplyPlacementsForActiveGame();
+    if (gameState.activeGameId) db.ref('games/' + gameState.activeGameId + '/done').set(true);
+  }
 }
 function renderReleaseButton() {
   const el = document.getElementById('releaseRow');
@@ -167,7 +199,7 @@ function renderGameGrid() {
   `).join('');
 }
 function renderPhaseRow() {
-  const phases = [['idle', 'Startbildschirm'], ['rules', 'Regeln zeigen'], ['active', 'Spiel aktiv'], ['closed', 'Runde geschlossen'], ['leaderboard', 'Rangliste zeigen']];
+  const phases = [['idle', 'Startbildschirm'], ['rules', 'Regeln zeigen'], ['active', 'Spiel aktiv'], ['closed', 'Runde geschlossen'], ['leaderboard', 'Rangliste zeigen'], ['rooms', 'Räume zeigen']];
   document.getElementById('phaseRow').innerHTML = phases.map(([p, label]) => `
     <button class="ghost ${gameState.phase === p ? 'active' : ''}" onclick="setPhase('${p}')">${label}</button>
   `).join('');
@@ -195,6 +227,80 @@ function renderTeamOverview() {
   ` : `<div class="small">Noch keine Teams angemeldet.</div>`;
 }
 function removeTeam(id) { if (confirm('Team wirklich entfernen?')) db.ref('teams/' + id).remove(); }
+
+// ---------- Team-Displays, grobe Live-Vorschau ----------
+// Kein echtes Mirroring, jedes Team-iPad meldet nur einen kurzen Status-Text (siehe team.html).
+function renderTeamStatusGrid() {
+  const el = document.getElementById('teamStatusGrid');
+  if (!el) return;
+  const entries = Object.entries(teams);
+  el.innerHTML = entries.length ? entries.map(([id, t]) => `
+    <div class="status-tile">
+      <span class="dot" style="background:${teamColor(t)};"></span>
+      <span class="name">${escapeHtml(t.name)}</span>
+      <div class="status">${escapeHtml(t.status || 'Online')}</div>
+    </div>
+  `).join('') : '<div class="small">Noch keine Teams angemeldet.</div>';
+}
+
+// ---------- Räume-Übersicht und Zufalls-Auswahl ----------
+// "Nächste Runde": lost fair aus, welches Team als nächstes die Box aussuchen darf.
+// Jede Team-ID kommt erst dann ein zweites Mal dran, wenn wirklich alle einmal dran waren
+// (die Warteschlange wird komplett geleert, bevor neu gemischt wird).
+function renderRoomsGrid() {
+  const el = document.getElementById('roomsGrid');
+  if (!el) return;
+  el.innerHTML = GAMES.map(g => {
+    const done = !!((gameData[g.id] || {}).done);
+    return `
+      <div class="room-tile ${done ? 'done' : ''}" style="--accent:${g.accent};">
+        <span class="name">${escapeHtml(g.name)}</span><span class="sub">${escapeHtml(g.sub)}</span>
+        <div class="small" style="margin-top:4px;">${done ? 'Vergeben' : 'Offen'}</div>
+      </div>
+    `;
+  }).join('');
+}
+function renderPickerStatus() {
+  const el = document.getElementById('pickerStatus');
+  if (!el) return;
+  const pickerId = gameState.currentPicker;
+  if (!pickerId) { el.innerHTML = '<div class="small">Aktuell wählt kein Team, auf "Nächste Runde" klicken.</div>'; return; }
+  const team = teams[pickerId] || {};
+  if (gameState.pickerChoice) {
+    const chosen = gameById(gameState.pickerChoice);
+    el.innerHTML = `
+      <div class="row-flex">
+        <span class="dot" style="background:${teamColor(team)};"></span>
+        <span><strong>${escapeHtml(team.name || '?')}</strong> hat <strong>${escapeHtml(chosen ? chosen.name : '?')}</strong> gewählt</span>
+        <button onclick="startPickedGame()">Jetzt starten</button>
+      </div>
+    `;
+  } else {
+    el.innerHTML = `
+      <div class="row-flex">
+        <span class="dot" style="background:${teamColor(team)};"></span>
+        <span><strong>${escapeHtml(team.name || '?')}</strong> wählt gerade die nächste Box aus …</span>
+      </div>
+    `;
+  }
+}
+function startNextRoundPick() {
+  let queue = (gameState.pickQueue || []).filter(id => teams[id]);
+  if (!queue.length) {
+    const openGames = GAMES.filter(g => !((gameData[g.id] || {}).done));
+    if (!openGames.length) { alert('Alle Boxen sind schon vergeben.'); return; }
+    queue = shuffleArray(Object.keys(teams));
+  }
+  if (!queue.length) { alert('Noch keine Teams angemeldet.'); return; }
+  const nextId = queue.shift();
+  setGameState({ currentPicker: nextId, pickerChoice: null, pickQueue: queue });
+}
+function startPickedGame() {
+  if (!gameState.pickerChoice) return;
+  const gameId = gameState.pickerChoice;
+  setActiveGame(gameId);
+  setGameState({ currentPicker: null, pickerChoice: null });
+}
 
 // ---------- Spiel-Steuerung je Typ ----------
 function renderGameControlPanel() {
@@ -568,12 +674,20 @@ function buzzerPanel(game) {
     Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([id, p]) => `${escapeHtml((teams[id] || {}).name || id)}: ${p}`).join(', ') || '–'
   }</div>`;
 
+  const isNumbers = !!(game.numbersRounds && game.numbersRounds[round - 1]);
+  const numbersRevealBtn = isNumbers ? `
+    <div class="row-flex" style="margin-top:10px;">
+      <button class="ghost" onclick="setGameState({numbersReveal: ${gameState.numbersReveal ? 'false' : 'true'}})">${gameState.numbersReveal ? 'Auflösung wieder verbergen' : 'Auflösung auf der Leinwand zeigen'}</button>
+    </div>
+  ` : '';
+
   return `
     <div class="row-flex">
       <span>Runde ${round} / ${game.rounds}</span>
-      <button class="ghost" onclick="setGameState({round: Math.max(1, ${round} - 1)})">Zurück</button>
-      <button class="ghost" onclick="setGameState({round: Math.min(${game.rounds}, ${round} + 1)})">Nächste Runde</button>
+      <button class="ghost" onclick="setGameState({round: Math.max(1, ${round} - 1), numbersReveal: false})">Zurück</button>
+      <button class="ghost" onclick="setGameState({round: Math.min(${game.rounds}, ${round} + 1), numbersReveal: false})">Nächste Runde</button>
     </div>
+    ${numbersRevealBtn}
     ${orderHtml}
     ${actionHtml}
     ${roundPtsHtml}
@@ -621,7 +735,11 @@ function render() {
   renderGameGrid();
   renderPhaseRow();
   renderReleaseButton();
+  renderPrioReleaseButton();
   renderTeamOverview();
+  renderTeamStatusGrid();
+  renderRoomsGrid();
+  renderPickerStatus();
   renderGameControlPanel();
   renderLeaderboard();
 }

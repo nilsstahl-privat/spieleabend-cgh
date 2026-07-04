@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spieleabend, Regie mobil</title>
+<link rel="stylesheet" href="brand.css">
+<style>
+  body { padding: 20px 16px 60px; }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  h2 { font-size: 12px; letter-spacing: 0.06em; color: var(--ink-soft); margin-bottom: 10px; text-transform: uppercase; }
+  .timer-display { font-size: 48px; font-weight: 900; text-align: center; font-variant-numeric: tabular-nums; margin: 6px 0 14px; }
+  .row-flex { display:flex; align-items:center; gap:10px; flex-wrap: wrap; justify-content:center; }
+  button { min-height: 52px; font-size: 16px; padding: 0 18px; }
+  input[type=number] { min-height: 44px; font-size: 16px; width: 90px; text-align:center; }
+  .panel { margin-top: 16px; }
+  .lb-row { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:10px; background: var(--bg); border:1px solid var(--line); margin-bottom:8px; }
+  .lb-row.first { background: var(--yellow-soft); border-color: var(--yellow); }
+  .dot { width: 14px; height:14px; border-radius:50%; display:inline-block; }
+  .small { font-size: 12px; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row-flex" style="justify-content:space-between;">
+    <div>
+      <span class="eyebrow">Regie mobil</span>
+      <h1 style="font-size: 22px; margin-top:4px;">Timer &amp; Punkte</h1>
+    </div>
+    <span id="connBadge" class="small"></span>
+  </div>
+
+  <div class="panel">
+    <h2>Aktuelle Box</h2>
+    <div id="currentGame"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Timer</h2>
+    <div class="timer-display" id="timerDisplay">00:00</div>
+    <div class="row-flex">
+      <input type="number" id="timerSeconds" value="120" min="5"> Sek.
+    </div>
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="startTimer()">Start</button>
+      <button class="ghost" onclick="pauseTimer()">Pause</button>
+      <button class="ghost" onclick="resetTimer()">Reset</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Gesamtwertung</h2>
+    <div id="leaderboard"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script src="shared.js"></script>
+<script>
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// Schlanke Regie-Version fürs Handy, nutzt dieselbe Firebase-Datenstruktur wie regie.html.
+// Kein eigener State, nur Timer-Steuerung und Punktestand einsehen.
+let teams = {};
+let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null };
+let gameData = {};
+let connected = true;
+
+db.ref('teams').on('value', s => { teams = s.val() || {}; render(); });
+db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1 }, s.val() || {}); render(); });
+db.ref('games').on('value', s => { gameData = s.val() || {}; render(); });
+db.ref('.info/connected').on('value', s => { connected = s.val() === true; renderConnBadge(); });
+
+function renderConnBadge() {
+  const el = document.getElementById('connBadge');
+  if (!el) return;
+  el.textContent = connected ? '● verbunden' : '● keine Verbindung';
+  el.style.color = connected ? '#2E7D74' : '#B24C63';
+  el.style.fontWeight = '800';
+}
+
+function setGameState(patch) { db.ref('gameState').update(patch); }
+function startTimer() {
+  const secs = parseInt(document.getElementById('timerSeconds').value, 10) || 120;
+  setGameState({ timerDuration: secs, timerEndsAt: Date.now() + secs * 1000 });
+}
+function pauseTimer() {
+  if (!gameState.timerEndsAt) return;
+  const remaining = Math.max(0, Math.round((gameState.timerEndsAt - Date.now()) / 1000));
+  setGameState({ timerDuration: remaining, timerEndsAt: null });
+}
+function resetTimer() { setGameState({ timerEndsAt: null, timerDuration: parseInt(document.getElementById('timerSeconds').value, 10) || 120 }); }
+
+setInterval(() => {
+  const d = document.getElementById('timerDisplay');
+  if (!d) return;
+  if (gameState.timerEndsAt) d.textContent = fmtTime((gameState.timerEndsAt - Date.now()) / 1000);
+  else d.textContent = fmtTime(gameState.timerDuration || 0);
+}, 250);
+
+function teamColor(t) { return (TEAM_COLORS.find(c => c.id === t.colorId) || {}).hex || '#ccc'; }
+
+function renderCurrentGame() {
+  const el = document.getElementById('currentGame');
+  if (!el) return;
+  const game = gameById(gameState.activeGameId);
+  el.innerHTML = game
+    ? `<div style="font-weight:800;">${escapeHtml(game.name)}</div><div class="small">${escapeHtml(game.sub)}, Phase: ${escapeHtml(gameState.phase)}</div>`
+    : '<div class="small">Noch keine Box aktiv.</div>';
+}
+
+function renderLeaderboard() {
+  const totals = {};
+  Object.keys(teams).forEach(id => totals[id] = 0);
+  GAMES.forEach(g => {
+    const placements = ((gameData[g.id] || {}).placements) || {};
+    [1, 2, 3].forEach(p => {
+      (placements[p] || []).forEach(id => {
+        if (teams[id]) totals[id] = (totals[id] || 0) + pointsForPlacement(p, (teams[id].prios || []).includes(g.id));
+      });
+    });
+  });
+  const ranked = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  const el = document.getElementById('leaderboard');
+  if (!el) return;
+  el.innerHTML = ranked.length ? ranked.map(([id, pts], i) => `
+    <div class="lb-row ${i === 0 ? 'first' : ''}">
+      <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
+      <span style="flex:1; font-weight:700;">${escapeHtml((teams[id] || {}).name || '?')}</span>
+      <span style="font-weight:900;">${pts} Pkt.</span>
+    </div>
+  `).join('') : '<div class="small">Noch keine Teams.</div>';
+}
+
+function render() {
+  renderConnBadge();
+  renderCurrentGame();
+  renderLeaderboard();
+}
+render();
+</script>
+</body>
+</html>
