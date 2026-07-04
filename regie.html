@@ -605,6 +605,9 @@ function racePanel(game) {
   const order = g.order || [];
   const currentIndex = g.currentIndex || 0;
   const drawing = !!g.drawing;
+  // currentStart liegt in Firebase (wie beim Dreibein), nicht nur im Browser-Speicher: so geht die
+  // laufende Zeit nicht verloren, falls die Regie-Seite mitten im Rennen neu geladen wird.
+  const currentStart = g.currentStart || null;
 
   if (!order.length) {
     return `
@@ -626,9 +629,9 @@ function racePanel(game) {
       <span class="small">ist dran, Team ${currentIndex + 1} von ${order.length}</span>
     </div>
     <div class="row-flex">
-      <button class="stopwatch-btn go" onclick="startRace()">Start</button>
-      <button class="stopwatch-btn stop" ${window._raceStart ? '' : 'disabled'} onclick="stopLane('${currentTeamId}', '${game.id}', ${currentIndex})">Stopp</button>
-      <span class="small" id="raceStartInfo">${window._raceStart ? 'Läuft…' : 'Nicht gestartet'}</span>
+      <button class="stopwatch-btn go" onclick="startRace('${game.id}')">Start</button>
+      <button class="stopwatch-btn stop" ${currentStart ? '' : 'disabled'} onclick="stopLane('${currentTeamId}', '${game.id}', ${currentIndex})">Stopp</button>
+      <span class="small" id="raceStartInfo">${currentStart ? 'Läuft…' : 'Nicht gestartet'}</span>
     </div>
   `;
 
@@ -647,11 +650,12 @@ function racePanel(game) {
     </div>
   `;
 }
-function startRace() { window._raceStart = Date.now(); render(); }
+function startRace(gameId) { db.ref('games/' + gameId + '/currentStart').set(Date.now()); }
 function stopLane(teamId, gameId, index) {
-  if (!window._raceStart) { alert('Zuerst Start drücken.'); return; }
-  const seconds = Math.round((Date.now() - window._raceStart) / 100) / 10;
-  window._raceStart = null;
+  const start = ((gameData[gameId] || {}).currentStart) || null;
+  if (!start) { alert('Zuerst Start drücken.'); return; }
+  const seconds = Math.round((Date.now() - start) / 100) / 10;
+  db.ref('games/' + gameId + '/currentStart').set(null);
   db.ref('games/' + gameId + '/values/' + teamId).set(seconds).then(() => autoApplyRacePlacements(gameId));
   db.ref('games/' + gameId + '/currentIndex').set(index + 1);
 }

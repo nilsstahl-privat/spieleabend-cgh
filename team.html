@@ -317,19 +317,34 @@ function liveScreen() {
   const game = gameById(gameState.activeGameId);
   let body = '';
 
-  if (!game || gameState.phase === 'idle') {
-    body = `
-      <div class="panel" style="text-align:center; padding: 40px 20px;">
-        <div class="eyebrow">Wartet auf die Regie</div>
-        <div class="big-title">Bereit für<br>den Abend?</div>
-      </div>
-    `;
-  } else if (gameState.phase === 'leaderboard') {
+  // Reihenfolge bewusst wie in praesentation.html: Phasen, die kein aktives Spiel brauchen
+  // (Rangliste, Räume-Übersicht), zuerst prüfen. Sonst würde z.B. vor dem allerersten Boxen-Pick
+  // (activeGameId noch leer) fälschlich der generische "Bereit für den Abend?"-Screen greifen,
+  // statt der passenden Meldung für die laufende Phase.
+  if (gameState.phase === 'leaderboard') {
     body = `
       <div class="panel" style="text-align:center; padding: 40px 20px;">
         <div class="eyebrow">Zwischenstand</div>
         <div class="big-title">${computeMyPoints()} Punkte</div>
         <div class="rule-text">Die volle Rangliste läuft auf der Leinwand.</div>
+      </div>
+    `;
+  } else if (gameState.phase === 'rooms') {
+    // Team, das gerade selbst auswählt, bekommt weiter oben in renderInner() bereits die eigene
+    // pickerScreen() angezeigt; alle anderen Teams sehen hier nur einen neutralen Wartehinweis,
+    // statt (Bug-Fix) die alten Regeln des zuletzt gespielten Spiels weiter anzuzeigen.
+    body = `
+      <div class="panel" style="text-align:center; padding: 40px 20px;">
+        <div class="eyebrow">Räume-Übersicht</div>
+        <div class="big-title">Die nächste<br>Box wird<br>ausgelost</div>
+        <div class="rule-text">Schaut auf die Leinwand, gleich geht's weiter.</div>
+      </div>
+    `;
+  } else if (!game || gameState.phase === 'idle') {
+    body = `
+      <div class="panel" style="text-align:center; padding: 40px 20px;">
+        <div class="eyebrow">Wartet auf die Regie</div>
+        <div class="big-title">Bereit für<br>den Abend?</div>
       </div>
     `;
   } else if (gameState.phase === 'rules') {
@@ -543,8 +558,9 @@ function reportStatus(text) {
 }
 function liveStatusText() {
   const game = gameById(gameState.activeGameId);
-  if (!game || gameState.phase === 'idle') return 'Wartet auf den Abend';
   if (gameState.phase === 'leaderboard') return 'Sieht Zwischenstand';
+  if (gameState.phase === 'rooms') return 'Sieht Räume-Übersicht';
+  if (!game || gameState.phase === 'idle') return 'Wartet auf den Abend';
   if (gameState.phase === 'rules') return 'Sieht Regeln: ' + game.name;
   if (gameState.phase === 'closed') return 'Sieht Rundenauswertung: ' + game.name;
   if (gameState.phase === 'active') return 'Spielt: ' + game.name;
