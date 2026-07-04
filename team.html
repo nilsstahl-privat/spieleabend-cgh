@@ -99,7 +99,7 @@ if (!teamId) {
 
 let teamsSnapshot = {};
 let myTeam = null;
-let gameState = { activeGameId: null, phase: 'idle', timerEndsAt: null, timerDuration: null, round: 1, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null };
+let gameState = { activeGameId: null, phase: 'idle', timerEndsAt: null, timerDuration: null, round: 1, priosReleased: false, currentPicker: null, pickerChoice: null };
 let gameData = {}; // /games snapshot
 let connected = true;
 
@@ -114,7 +114,7 @@ let pickerChoiceAt = null;
 let pickerChoiceTimer = null;
 db.ref('gameState').on('value', snap => {
   const prevChoice = gameState.pickerChoice;
-  gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null }, snap.val() || {});
+  gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, priosReleased: false, currentPicker: null, pickerChoice: null }, snap.val() || {});
   if (gameState.pickerChoice && gameState.pickerChoice !== prevChoice) {
     // Bestätigung "Ihr habt X gewählt" nur kurz zeigen, danach automatisch zurück zum normalen Bildschirm.
     pickerChoiceAt = Date.now();
@@ -311,15 +311,7 @@ function liveScreen() {
   const game = gameById(gameState.activeGameId);
   let body = '';
 
-  if (!gameState.teamsReleased) {
-    // Holding Screen: die Regie muss jeden neuen Inhalt erst explizit freigeben.
-    body = `
-      <div class="panel" style="text-align:center; padding: 40px 20px;">
-        <div class="eyebrow">Wartet auf die Regie</div>
-        <div class="big-title">Gleich geht's<br>weiter …</div>
-      </div>
-    `;
-  } else if (!game || gameState.phase === 'idle') {
+  if (!game || gameState.phase === 'idle') {
     body = `
       <div class="panel" style="text-align:center; padding: 40px 20px;">
         <div class="eyebrow">Wartet auf die Regie</div>
@@ -458,6 +450,10 @@ function finishTaste(gameId) {
 
 function buzzerBody(game) {
   const round = gameState.round || 1;
+  // Manche Runden (z.B. Numbers Game Runde 3) laufen nicht über den Buzzer, sondern per
+  // Zahlen-Eingabe: wer am nächsten an der Zielzahl liegt, gewinnt statt wer zuerst buzzert.
+  const roundConfig = game.numbersRounds && game.numbersRounds[round - 1];
+  if (roundConfig && roundConfig.mode === 'closest') return closestValueBody(game, round);
   const buzzed = (((gameData[game.id] || {}).rounds || {})[round] || {}).buzzes || {};
   const alreadyBuzzed = buzzed[teamId];
   const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
@@ -467,6 +463,31 @@ function buzzerBody(game) {
       ${alreadyBuzzed ? 'Gebuzzert!' : 'BUZZER'}
     </button>
   `;
+}
+function closestValueBody(game, round) {
+  const answers = (((gameData[game.id] || {}).rounds || {})[round] || {}).answers || {};
+  const mine = answers[teamId];
+  const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
+  const already = mine !== undefined && mine !== null && mine !== '';
+  if (already) {
+    return `
+      <div class="rule-text">${label}</div>
+      <div style="text-align:center; margin-top:16px; font-weight:800; color:#2E7D74;">✓ Eingetragen: ${escapeHtml(String(mine))}</div>
+      <div class="save-note">Wer am nächsten an der Zielzahl ist, gewinnt diese Runde.</div>
+    `;
+  }
+  return `
+    <div class="rule-text">${label}</div>
+    <input id="closestInput_${game.id}" type="number" step="any" placeholder="Euer Ergebnis" style="width:100%; margin-top:10px;">
+    <button style="width:100%; margin-top:10px;" onclick="submitClosestValue('${game.id}', ${round})">Abschicken</button>
+  `;
+}
+function submitClosestValue(gameId, round) {
+  if (gameState.activeGameId !== gameId || gameState.phase !== 'active') return;
+  const el = document.getElementById('closestInput_' + gameId);
+  const val = el ? parseFloat(el.value) : NaN;
+  if (isNaN(val)) { alert('Bitte eine Zahl eingeben.'); return; }
+  db.ref('games/' + gameId + '/rounds/' + round + '/answers/' + teamId).set(val).catch(console.error);
 }
 function pressBuzzer(gameId, round) {
   if (gameState.activeGameId !== gameId || gameState.phase !== 'active') return;
@@ -515,7 +536,6 @@ function reportStatus(text) {
   db.ref('teams/' + teamId + '/status').set(text).catch(console.error);
 }
 function liveStatusText() {
-  if (!gameState.teamsReleased) return 'Wartet auf Freigabe';
   const game = gameById(gameState.activeGameId);
   if (!game || gameState.phase === 'idle') return 'Wartet auf den Abend';
   if (gameState.phase === 'leaderboard') return 'Sieht Zwischenstand';

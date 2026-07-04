@@ -326,20 +326,44 @@ function buzzOrderRows(game, round) {
   }).join('');
 }
 
+// Baut die Rangliste für Zahlen-Eingabe-Runden (z.B. Numbers Game Runde 3): sortiert nach
+// Abstand zur Zielzahl, ohne Buzzer. Zeigt keine Namen der Konkurrenz-Eingaben vorher live an,
+// nur nach dem Aufdecken (analog zu buzzOrderRows für Buzzer-Runden).
+function closestValueRows(game, round, target) {
+  const roundData = (((gameData[game.id] || {}).rounds || {})[round]) || {};
+  const answers = roundData.answers || {};
+  const entries = Object.entries(answers).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([id, v]) => [id, v, Math.abs(v - target)])
+    .sort((a, b) => a[2] - b[2]);
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  return entries.map(([id, v, diff], i) => `
+    <div class="order-row"><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
+      <span style="flex:1; text-align:left;">${i + 1}. ${escapeHtml((teams[id] || {}).name || '')}</span>
+      <span>${v}</span><span>${medals[i + 1] || ''}</span></div>
+  `).join('');
+}
+
 function buzzerActiveView(game) {
   const round = gameState.round || 1;
+  const roundConfig = game.numbersRounds && game.numbersRounds[round - 1];
+  const isClosestRound = !!(roundConfig && roundConfig.mode === 'closest');
   const buzzes = (((gameData[game.id] || {}).rounds || {})[round] || {}).buzzes || {};
+  const answers = (((gameData[game.id] || {}).rounds || {})[round] || {}).answers || {};
+  const answeredCount = isClosestRound ? Object.keys(answers).length : Object.keys(buzzes).length;
   const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
   const song = game.songs && game.songs[round - 1];
   const audio = song ? `
     <audio data-song-url="${escapeHtml(song.url)}" src="${song.url}" controls autoplay style="margin-top: 24px; width: 100%; max-width: 560px;"></audio>
     <div class="rule-big" style="font-size: clamp(14px,1.4vw,18px); margin-top:6px; opacity:0.7;">Spielt der Beamer-Ton nicht automatisch, einmal auf Play tippen.</div>
   ` : '';
-  const isNumbers = !!(game.numbersRounds && game.numbersRounds[round - 1]);
-  const buzzOrderBlock = gameState.buzzOrderReveal ? `
+  const isNumbers = !!roundConfig;
+  const buzzOrderBlock = (!isClosestRound && gameState.buzzOrderReveal) ? `
     <div class="rule-big" style="margin-top:18px; font-weight:800;">Wer war zuerst?</div>
     <div style="margin-top:10px;">${buzzOrderRows(game, round) || '<div class="rule-big">Niemand hat gebuzzert.</div>'}</div>
   ` : '';
+  const statusText = isClosestRound
+    ? `${answeredCount} Team${answeredCount === 1 ? '' : 's'} ${answeredCount === 1 ? 'hat' : 'haben'} eine Zahl eingetragen`
+    : `${answeredCount} Team${answeredCount === 1 ? '' : 's'} ${answeredCount === 1 ? 'hat' : 'haben'} gebuzzert`;
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big">${escapeHtml(game.name)}</div>
@@ -348,22 +372,26 @@ function buzzerActiveView(game) {
     ${numbersBlock(game, round)}
     <div class="rule-big" style="margin-top:6px;">Verbleibende Zeit</div>
     <div class="timer-big" id="timerBig" style="font-size: clamp(40px,8vw,100px); margin-top:0;">--:--</div>
-    <div class="rule-big">${Object.keys(buzzes).length} Team${Object.keys(buzzes).length === 1 ? '' : 's'} ${Object.keys(buzzes).length === 1 ? 'hat' : 'haben'} gebuzzert</div>
+    <div class="rule-big">${statusText}</div>
     ${buzzOrderBlock}
   `;
 }
 
 function buzzerRevealView(game) {
   const round = gameState.round || 1;
-  const rows = buzzOrderRows(game, round);
+  const roundConfig = game.numbersRounds && game.numbersRounds[round - 1];
+  const isClosestRound = !!(roundConfig && roundConfig.mode === 'closest');
+  const rows = isClosestRound ? closestValueRows(game, round, roundConfig.target) : buzzOrderRows(game, round);
   const song = game.songs && game.songs[round - 1];
   const reveal = song ? `<div class="rule-big" style="margin-top:-6px;">Das Original: <strong>${escapeHtml(song.title)}</strong></div>` : '';
+  const title = isClosestRound ? 'Wer war am nächsten dran?' : 'Wer war zuerst?';
+  const emptyText = isClosestRound ? 'Niemand hat eine Zahl eingetragen.' : 'Niemand hat gebuzzert.';
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
-    <div class="title-big" style="font-size: clamp(34px,5vw,60px);">Wer war zuerst?</div>
+    <div class="title-big" style="font-size: clamp(34px,5vw,60px);">${title}</div>
     ${reveal}
     ${numbersBlock(game, round)}
-    <div style="margin-top: 24px;">${rows || '<div class="rule-big">Niemand hat gebuzzert.</div>'}</div>
+    <div style="margin-top: 24px;">${rows || `<div class="rule-big">${emptyText}</div>`}</div>
   `;
 }
 

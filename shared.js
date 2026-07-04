@@ -82,7 +82,7 @@ type: "buzzer", rounds: 3, roundSeconds: 120,
 numbersRounds: [
 { numbers: [50, 8, 3, 7, 2, 10], target: 556, solution: "(50 × 10) + (8 × 7) = 556" },
 { numbers: [100, 2, 7, 10, 8, 5], target: 701, solution: "7 × 100 = 700, 10 ÷ 2 = 5, 5 ÷ 5 = 1, 700 + 1 = 701" },
-{ numbers: [25, 4, 3, 8, 6, 2], target: 106, solution: "25 × 4 = 100, 100 + 6 = 106" },
+{ numbers: [3, 5, 7, 4, 8, 9], target: 570, solution: "8 + 4 + 7 = 19, (9 − 3) × 19 = 114, 114 × 5 = 570", mode: "closest" },
 ],
 },
 {

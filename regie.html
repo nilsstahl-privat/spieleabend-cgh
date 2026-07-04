@@ -52,7 +52,6 @@
     <h2>Bühne steuern</h2>
     <div class="grid-2" id="gameGrid"></div>
     <div class="phase-row" id="phaseRow"></div>
-    <div class="row-flex" id="releaseRow" style="margin-top:12px;"></div>
   </div>
 
   <div class="panel">
@@ -100,12 +99,12 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 let teams = {};
-let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] };
+let gameState = { activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] };
 let gameData = {};
 let connected = true;
 
 db.ref('teams').on('value', s => { teams = s.val() || {}; render(); });
-db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] }, s.val() || {}); render(); });
+db.ref('gameState').on('value', s => { gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] }, s.val() || {}); render(); });
 db.ref('games').on('value', s => { gameData = s.val() || {}; render(); });
 db.ref('.info/connected').on('value', s => { connected = s.val() === true; renderConnBadge(); });
 
@@ -122,7 +121,7 @@ function resetEverything() {
   if (!confirm('Ganz sicher? Das ist nur zum Testen vor dem echten Abend gedacht.')) return;
   db.ref('teams').remove();
   db.ref('games').remove();
-  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] });
+  db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] });
 }
 function togglePriosReleased() { setGameState({ priosReleased: !gameState.priosReleased }); }
 function renderPrioReleaseButton() {
@@ -134,7 +133,7 @@ function renderPrioReleaseButton() {
 
 function setGameState(patch) { db.ref('gameState').update(patch); }
 // Neue Box ausgewählt: Handys bleiben bewusst auf dem Holding Screen, bis explizit freigegeben wird.
-function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false, numbersReveal: false, buzzOrderReveal: false }); }
+function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, numbersReveal: false, buzzOrderReveal: false }); }
 function setPhase(phase) {
   // Bug-Fix: bei Buzzer-Spielen mit mehreren Runden (Numbers Game, KI-Songs) schließt "Spiel
   // abschließen" sonst versehentlich das GESAMTE Spiel nach nur einer Runde. Die Rundennavigation
@@ -156,15 +155,9 @@ function setPhase(phase) {
     if (gameState.activeGameId) db.ref('games/' + gameState.activeGameId + '/done').set(true);
   }
 }
-function renderReleaseButton() {
-  const el = document.getElementById('releaseRow');
-  if (!el) return;
-  const released = !!gameState.teamsReleased;
-  el.innerHTML = `
-    <button class="${released ? 'ghost' : ''}" onclick="setGameState({teamsReleased: ${released ? 'false' : 'true'}})">${released ? 'Handys wieder sperren' : 'Jetzt auf den Handys freigeben'}</button>
-    <span class="small">${released ? 'Teams sehen den aktuellen Inhalt.' : 'Teams sehen einen Warte-Screen, bis du freigibst.'}</span>
-  `;
-}
+// Die separate "Freigabe"-Funktion wurde entfernt: "Spiel aktiv" (Phase) steuert jetzt allein,
+// was auf den Team-Handys erscheint. Solange die Regie nicht auf "Spiel aktiv" schaltet, sehen
+// die Teams ohnehin nur den Warte-/Regeln-Screen der jeweiligen Phase.
 function autoApplyPlacementsForActiveGame() {
   const game = gameById(gameState.activeGameId);
   if (!game) return;
@@ -713,6 +706,22 @@ function roundTimestamps(game, round) {
   return roundData.buzzes || {};
 }
 function roundPoints(game, round) {
+  // Manche Runden (z.B. Numbers Game Runde 3) laufen per Zahlen-Eingabe statt Buzzer: die
+  // Punkte gehen an die Teams, die am nächsten an der Zielzahl liegen (Gleichstand teilt sich
+  // die Platzierung, wiederverwendet dieselbe Ranglogik wie bei Brücke/Dreibein).
+  const roundConfig = game.numbersRounds && game.numbersRounds[round - 1];
+  if (roundConfig && roundConfig.mode === 'closest') {
+    const rounds = ((gameData[game.id] || {}).rounds) || {};
+    const answers = (rounds[round] || {}).answers || {};
+    const target = roundConfig.target;
+    const diffs = {};
+    Object.entries(answers).forEach(([id, v]) => { if (v !== undefined && v !== null && v !== '') diffs[id] = Math.abs(v - target); });
+    const ranked = rankedPlacements(diffs, false);
+    const scaleByPlacement = { 1: 3, 2: 2, 3: 1 };
+    const pts = {};
+    [1, 2, 3].forEach(p => (ranked[p] || []).forEach(id => { pts[id] = scaleByPlacement[p]; }));
+    return pts;
+  }
   // Gibt {teamId: internePunkte} für eine Runde zurück, 3-2-1 für die ersten drei korrekt markierten Teams in Zeit-Reihenfolge
   const timestamps = roundTimestamps(game, round);
   const rounds = ((gameData[game.id] || {}).rounds) || {};
@@ -736,35 +745,63 @@ function totalInternalPoints(game) {
 function buzzerPanel(game) {
   const round = gameState.round || 1;
   const rounds = ((gameData[game.id] || {}).rounds) || {};
-  const buzzes = (rounds[round] || {}).buzzes || {};
-  const marks = (rounds[round] || {}).marks || {};
+  const roundConfig = game.numbersRounds && game.numbersRounds[round - 1];
+  const isClosestRound = !!(roundConfig && roundConfig.mode === 'closest');
 
-  const order = Object.entries(buzzes).sort((a, b) => a[1] - b[1]);
-  const correctCount = order.filter(([id]) => marks[id] === 'correct').length;
-  const nextUp = order.find(([id]) => !marks[id]);
-  const canMarkMore = correctCount < 3 && nextUp;
-
-  let orderHtml = order.length ? `
-    <table><thead><tr><th>#</th><th>Team</th><th>Zeit</th><th></th></tr></thead><tbody>
-      ${order.map(([id, ts], i) => {
-        const baseTs = order[0][1];
-        const mark = marks[id];
-        const status = mark === 'correct' ? '✓ richtig' : mark === 'wrong' ? '✗ falsch' : (nextUp && nextUp[0] === id && canMarkMore ? '→ jetzt dran' : 'wartet');
-        return `<tr><td>${i + 1}</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>${escapeHtml((teams[id] || {}).name || id)}</td>
-          <td class="small">+${((ts - baseTs) / 1000).toFixed(1)} s</td><td class="small">${status}</td></tr>`;
-      }).join('')}
-    </tbody></table>
-  ` : `<div class="small">Noch niemand hat gebuzzert.</div>`;
-
-  let actionHtml = '';
-  if (canMarkMore) {
-    actionHtml = `
-      <div class="row-flex" style="margin-top:10px;">
-        <span>${escapeHtml((teams[nextUp[0]] || {}).name || '')} ist dran:</span>
-        <button onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', true)">Richtig</button>
-        <button class="ghost" onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', false)">Falsch</button>
-      </div>
+  let orderHtml, actionHtml, hasEntries;
+  if (isClosestRound) {
+    // Runde läuft per Zahlen-Eingabe: Teams tragen ihr Ergebnis ein, am nächsten an der
+    // Zielzahl gewinnt. Keine manuelle Richtig/Falsch-Markierung nötig, die Nähe entscheidet.
+    const answers = (rounds[round] || {}).answers || {};
+    const target = roundConfig.target;
+    const entries = Object.entries(answers).filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([id, v]) => [id, v, Math.abs(v - target)])
+      .sort((a, b) => a[2] - b[2]);
+    hasEntries = entries.length > 0;
+    orderHtml = `
+      <div class="small" style="margin-bottom:8px;">Zahlen-Eingabe statt Buzzer: am nächsten an der Zielzahl (${target}) gewinnt.</div>
+      ${entries.length ? `
+        <table><thead><tr><th>#</th><th>Team</th><th>Eingetragen</th><th>Abstand</th></tr></thead><tbody>
+          ${entries.map(([id, v, diff], i) => `
+            <tr><td>${i + 1}</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>${escapeHtml((teams[id] || {}).name || id)}</td>
+              <td>${v}</td><td class="small">${diff}</td></tr>
+          `).join('')}
+        </tbody></table>
+      ` : `<div class="small">Noch keine Zahlen eingetragen.</div>`}
     `;
+    actionHtml = '';
+  } else {
+    const buzzes = (rounds[round] || {}).buzzes || {};
+    const marks = (rounds[round] || {}).marks || {};
+
+    const order = Object.entries(buzzes).sort((a, b) => a[1] - b[1]);
+    hasEntries = order.length > 0;
+    const correctCount = order.filter(([id]) => marks[id] === 'correct').length;
+    const nextUp = order.find(([id]) => !marks[id]);
+    const canMarkMore = correctCount < 3 && nextUp;
+
+    orderHtml = order.length ? `
+      <table><thead><tr><th>#</th><th>Team</th><th>Zeit</th><th></th></tr></thead><tbody>
+        ${order.map(([id, ts], i) => {
+          const baseTs = order[0][1];
+          const mark = marks[id];
+          const status = mark === 'correct' ? '✓ richtig' : mark === 'wrong' ? '✗ falsch' : (nextUp && nextUp[0] === id && canMarkMore ? '→ jetzt dran' : 'wartet');
+          return `<tr><td>${i + 1}</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>${escapeHtml((teams[id] || {}).name || id)}</td>
+            <td class="small">+${((ts - baseTs) / 1000).toFixed(1)} s</td><td class="small">${status}</td></tr>`;
+        }).join('')}
+      </tbody></table>
+    ` : `<div class="small">Noch niemand hat gebuzzert.</div>`;
+
+    actionHtml = '';
+    if (canMarkMore) {
+      actionHtml = `
+        <div class="row-flex" style="margin-top:10px;">
+          <span>${escapeHtml((teams[nextUp[0]] || {}).name || '')} ist dran:</span>
+          <button onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', true)">Richtig</button>
+          <button class="ghost" onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', false)">Falsch</button>
+        </div>
+      `;
+    }
   }
 
   const roundPts = roundPoints(game, round);
@@ -777,15 +814,15 @@ function buzzerPanel(game) {
     Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([id, p]) => `${escapeHtml((teams[id] || {}).name || id)}: ${p}`).join(', ') || '–'
   }</div>`;
 
-  const isNumbers = !!(game.numbersRounds && game.numbersRounds[round - 1]);
+  const isNumbers = !!roundConfig;
   const numbersRevealBtn = isNumbers ? `
     <div class="row-flex" style="margin-top:10px;">
       <button class="ghost" onclick="setGameState({numbersReveal: ${gameState.numbersReveal ? 'false' : 'true'}})">${gameState.numbersReveal ? 'Auflösung wieder verbergen' : 'Auflösung auf der Leinwand zeigen'}</button>
     </div>
   ` : '';
-  const buzzOrderRevealBtn = `
+  const buzzOrderRevealBtn = isClosestRound ? '' : `
     <div class="row-flex" style="margin-top:10px;">
-      <button class="ghost" ${!order.length ? 'disabled' : ''} onclick="setGameState({buzzOrderReveal: ${gameState.buzzOrderReveal ? 'false' : 'true'}})">${gameState.buzzOrderReveal ? 'Buzz-Reihenfolge auf der Leinwand verbergen' : 'Buzz-Reihenfolge auf der Leinwand zeigen'}</button>
+      <button class="ghost" ${!hasEntries ? 'disabled' : ''} onclick="setGameState({buzzOrderReveal: ${gameState.buzzOrderReveal ? 'false' : 'true'}})">${gameState.buzzOrderReveal ? 'Buzz-Reihenfolge auf der Leinwand verbergen' : 'Buzz-Reihenfolge auf der Leinwand zeigen'}</button>
     </div>
   `;
 
@@ -911,7 +948,6 @@ function render() {
   renderConnBadge();
   renderGameGrid();
   renderPhaseRow();
-  renderReleaseButton();
   renderPrioReleaseButton();
   renderTeamOverview();
   renderRoomsGrid();
