@@ -24,10 +24,25 @@
   .lb-points { font-weight: 900; font-size: 30px; }
   .dot { width: 20px; height:20px; border-radius:50%; display:inline-block; }
   .order-row { display:flex; align-items:center; gap:16px; justify-content:center; font-size: 22px; margin-bottom: 10px; }
+
+  /* Kleine, dauerhafte Countdown-Leiste unten, unabhängig von der jeweils aktiven Ansicht/Box.
+     Startet die Regie den Timer, läuft dieselbe Zeit synchron auf den Team-iPads mit. */
+  body { padding-bottom: 100px; }
+  .countdown-bar { position: fixed; left:0; right:0; bottom:0; height: 46px; background: var(--bg);
+    border-top: 2px solid var(--line); display:flex; align-items:center; justify-content:center;
+    z-index: 100; overflow:hidden; }
+  .countdown-bar .fill { position:absolute; left:0; top:0; bottom:0; width:0%; background: var(--teal);
+    opacity:0.35; transition: width 0.25s linear; }
+  .countdown-bar span { position:relative; font-weight:900; font-variant-numeric: tabular-nums; font-size:20px; }
+  .countdown-bar.idle span { color: var(--ink-soft); }
 </style>
 </head>
 <body>
 <div class="wrap" id="app">Lädt…</div>
+<div class="countdown-bar idle" id="countdownBar">
+  <div class="fill" id="countdownFill"></div>
+  <span id="countdownText">--:--</span>
+</div>
 
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
@@ -488,6 +503,26 @@ setInterval(() => {
   if (gameState.timerEndsAt) el.textContent = fmtTime((gameState.timerEndsAt - Date.now()) / 1000);
   else el.textContent = fmtTime(gameState.timerDuration || 0);
 }, 250);
+
+// ---------- Kleine, dauerhafte Countdown-Leiste ----------
+// Unabhängig von render()/innerHTML (liegt außerhalb von #app), damit sie bei jeder Box/Phase
+// sichtbar bleibt und nicht durch andere Updates stockt. Dieselben Firebase-Felder wie die
+// Team-iPads, damit beide synchron laufen.
+function updateCountdownBar() {
+  const bar = document.getElementById('countdownBar');
+  const fill = document.getElementById('countdownFill');
+  const text = document.getElementById('countdownText');
+  if (!bar || !fill || !text) return;
+  const total = gameState.timerDuration || 0;
+  const running = !!gameState.timerEndsAt;
+  const remaining = running ? Math.max(0, (gameState.timerEndsAt - Date.now()) / 1000) : total;
+  text.textContent = fmtTime(remaining);
+  const pct = total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
+  fill.style.width = pct + '%';
+  bar.classList.toggle('idle', !running);
+}
+setInterval(updateCountdownBar, 250);
+updateCountdownBar();
 </script>
 </body>
 </html>
