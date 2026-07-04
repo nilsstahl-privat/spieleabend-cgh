@@ -144,7 +144,7 @@ function setPhase(phase) {
     if (game && (game.type === 'buzzer' || game.type === 'guess') && game.rounds) {
       const round = gameState.round || 1;
       if (round < game.rounds) {
-        const ok = confirm('Es sind noch nicht alle Runden gespielt (Runde ' + round + ' von ' + game.rounds + '). Trotzdem das GESAMTE Spiel abschließen und die Platzierung berechnen?');
+        const ok = confirm('Es sind noch nicht alle Runden gespielt (Runde ' + round + ' von ' + game.rounds + '). Trotzdem das GESAMTE Spiel auswerten und die Platzierung berechnen?');
         if (!ok) return;
       }
     }
@@ -201,7 +201,7 @@ function renderGameGrid() {
   `).join('');
 }
 function renderPhaseRow() {
-  const phases = [['idle', 'Startbildschirm'], ['rules', 'Spielname anzeigen'], ['active', 'Spiel aktiv'], ['closed', 'Spiel abschließen'], ['leaderboard', 'Rangliste zeigen'], ['rooms', 'Räume zeigen']];
+  const phases = [['idle', 'Startbildschirm'], ['rules', 'Spielname anzeigen'], ['active', 'Spiel aktiv'], ['closed', 'Spiel auswerten'], ['leaderboard', 'Rangliste zeigen'], ['rooms', 'Räume zeigen']];
   document.getElementById('phaseRow').innerHTML = phases.map(([p, label]) => `
     <button class="ghost ${gameState.phase === p ? 'active' : ''}" onclick="setPhase('${p}')">${label}</button>
   `).join('');
