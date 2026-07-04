@@ -313,7 +313,7 @@ function buzzerActiveView(game) {
   const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
   const song = game.songs && game.songs[round - 1];
   const audio = song ? `
-    <audio src="${song.url}" controls autoplay style="margin-top: 24px; width: 100%; max-width: 560px;"></audio>
+    <audio data-song-url="${escapeHtml(song.url)}" src="${song.url}" controls autoplay style="margin-top: 24px; width: 100%; max-width: 560px;"></audio>
     <div class="rule-big" style="font-size: clamp(14px,1.4vw,18px); margin-top:6px; opacity:0.7;">Spielt der Beamer-Ton nicht automatisch, einmal auf Play tippen.</div>
   ` : '';
   const isNumbers = !!(game.numbersRounds && game.numbersRounds[round - 1]);
@@ -435,7 +435,22 @@ function render() {
   else if (gameState.phase === 'closed') html = closedView(game);
   else if (gameState.phase === 'active') html = activeView(game);
   else html = idleView();
-  document.getElementById('app').innerHTML = html;
+
+  // Jedes Firebase-Update (z.B. ein Buzz) baut den Bildschirm komplett neu auf, was sonst
+  // das <audio>-Element neu erzeugt und den Song von vorne startet. Deshalb Abspielposition
+  // vorher merken und danach wiederherstellen, statt den Song neu zu starten.
+  const app = document.getElementById('app');
+  const prevAudio = app.querySelector('audio');
+  const prevAudioState = prevAudio ? { url: prevAudio.dataset.songUrl, time: prevAudio.currentTime, paused: prevAudio.paused } : null;
+
+  app.innerHTML = html;
+
+  const newAudio = app.querySelector('audio');
+  if (newAudio && prevAudioState && prevAudioState.url && newAudio.dataset.songUrl === prevAudioState.url) {
+    newAudio.currentTime = prevAudioState.time;
+    if (prevAudioState.paused) newAudio.pause();
+    else newAudio.play().catch(() => {});
+  }
 }
 render();
 
