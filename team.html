@@ -346,6 +346,7 @@ function activeBody(game) {
   if (game.type === 'quiz') return quizBody(game);
   if (game.type === 'taste') return tasteInput(game);
   if (game.type === 'buzzer') return buzzerBody(game);
+  if (game.type === 'guess') return guessBody(game);
   // value / manual / race: team just waits, Regie steuert
   return `<div class="rule-text">${escapeHtml(game.rule)}</div><div class="rule-text" style="margin-top:10px;">Die Regie trägt eure Ergebnisse ein.</div>`;
 }
@@ -455,6 +456,38 @@ function buzzerBody(game) {
 function pressBuzzer(gameId, round) {
   if (gameState.activeGameId !== gameId || gameState.phase !== 'active') return;
   db.ref('games/' + gameId + '/rounds/' + round + '/buzzes/' + teamId).set(firebase.database.ServerValue.TIMESTAMP).catch(console.error);
+}
+
+// ---------- KI-Songs: Titel-Eingabe statt Buzzer ----------
+// Der Titel wird nur intern gespeichert (nicht öffentlich angezeigt), die Regie prüft von Hand,
+// ob richtig geraten wurde. Ablauf/Rhythmus (eine Abgabe pro Runde, danach gesperrt) wie beim Buzzer.
+function guessBody(game) {
+  const round = gameState.round || 1;
+  const guesses = (((gameData[game.id] || {}).rounds || {})[round] || {}).guesses || {};
+  const mine = guesses[teamId];
+  const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
+  if (mine) {
+    return `
+      <div class="rule-text">${label}</div>
+      <div style="text-align:center; margin-top:16px; font-weight:800; color:#2E7D74;">✓ Abgeschickt: "${escapeHtml(mine.title || '')}"</div>
+      <div class="save-note">Die Regie prüft von Hand, ob es richtig war.</div>
+    `;
+  }
+  return `
+    <div class="rule-text">${label}</div>
+    <input id="guessInput_${game.id}" type="text" placeholder="Wie heißt das Lied?" style="width:100%; margin-top:10px;">
+    <button style="width:100%; margin-top:10px;" onclick="submitGuess('${game.id}', ${round})">Abschicken</button>
+  `;
+}
+function submitGuess(gameId, round) {
+  if (gameState.activeGameId !== gameId || gameState.phase !== 'active') return;
+  const el = document.getElementById('guessInput_' + gameId);
+  const title = el ? el.value.trim() : '';
+  if (!title) { alert('Bitte einen Titel eingeben.'); return; }
+  db.ref('games/' + gameId + '/rounds/' + round + '/guesses/' + teamId).set({
+    title: title,
+    ts: firebase.database.ServerValue.TIMESTAMP,
+  }).catch(console.error);
 }
 
 // ---------- Status-Vorschau für die Regie ----------

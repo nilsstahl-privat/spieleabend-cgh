@@ -142,7 +142,7 @@ function setPhase(phase) {
   // Deshalb hier eine Sicherheitsabfrage, falls noch nicht alle Runden gespielt wurden.
   if (phase === 'closed') {
     const game = gameById(gameState.activeGameId);
-    if (game && game.type === 'buzzer' && game.rounds) {
+    if (game && (game.type === 'buzzer' || game.type === 'guess') && game.rounds) {
       const round = gameState.round || 1;
       if (round < game.rounds) {
         const ok = confirm('Es sind noch nicht alle Runden gespielt (Runde ' + round + ' von ' + game.rounds + '). Trotzdem das GESAMTE Spiel abschließen und die Platzierung berechnen?');
@@ -169,7 +169,7 @@ function autoApplyPlacementsForActiveGame() {
   const game = gameById(gameState.activeGameId);
   if (!game) return;
   if (game.type === 'quiz') applyPlacements('quiz', quizScores(), true);
-  else if (game.type === 'buzzer') applyPlacements(game.id, totalInternalPoints(game), true);
+  else if (game.type === 'buzzer' || game.type === 'guess') applyPlacements(game.id, totalInternalPoints(game), true);
   else if (game.type === 'value') applyPlacements(game.id, ((gameData[game.id] || {}).values) || {}, game.higherIsBetter);
   else if (game.type === 'race') applyPlacements(game.id, ((gameData[game.id] || {}).values) || {}, false);
   else if (game.type === 'taste') applyTastePlacements(game.id);
@@ -310,6 +310,7 @@ function renderGameControlPanel() {
   else if (game.type === 'grouprace') html += groupRacePanel(game);
   else if (game.type === 'taste') html += tastePanel(game);
   else if (game.type === 'buzzer') html += buzzerPanel(game);
+  else if (game.type === 'guess') html += guessPanel(game);
   panel.innerHTML = html;
 }
 
@@ -698,12 +699,25 @@ function applyTastePlacements(gameId) {
   applyPlacements(gameId, counts, true);
 }
 
-function roundPoints(game, round) {
-  // Gibt {teamId: internePunkte} für eine Runde zurück, 3-2-1 für die ersten drei korrekt markierten Teams in Buzz-Reihenfolge
+// Liefert {teamId: Zeitstempel} für eine Runde, egal ob Buzzer (Numbers Game, buzzes sind
+// direkt Zahlen) oder Texteingabe (KI-Songs, guesses sind {title, ts}-Objekte).
+function roundTimestamps(game, round) {
   const rounds = ((gameData[game.id] || {}).rounds) || {};
-  const buzzes = (rounds[round] || {}).buzzes || {};
+  const roundData = rounds[round] || {};
+  if (game.type === 'guess') {
+    const guesses = roundData.guesses || {};
+    const out = {};
+    Object.entries(guesses).forEach(([id, g]) => { if (g && g.ts) out[id] = g.ts; });
+    return out;
+  }
+  return roundData.buzzes || {};
+}
+function roundPoints(game, round) {
+  // Gibt {teamId: internePunkte} für eine Runde zurück, 3-2-1 für die ersten drei korrekt markierten Teams in Zeit-Reihenfolge
+  const timestamps = roundTimestamps(game, round);
+  const rounds = ((gameData[game.id] || {}).rounds) || {};
   const marks = (rounds[round] || {}).marks || {};
-  const order = Object.entries(buzzes).sort((a, b) => a[1] - b[1]).map(([id]) => id);
+  const order = Object.entries(timestamps).sort((a, b) => a[1] - b[1]).map(([id]) => id);
   const correctInOrder = order.filter(id => marks[id] === 'correct');
   const scale = [3, 2, 1];
   const pts = {};
@@ -783,6 +797,74 @@ function buzzerPanel(game) {
     </div>
     ${numbersRevealBtn}
     ${buzzOrderRevealBtn}
+    ${orderHtml}
+    ${actionHtml}
+    ${roundPtsHtml}
+    ${totalsHtml}
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="applyPlacements('${game.id}', totalInternalPoints(gameById('${game.id}')), true)">Gesamtplatzierung übernehmen</button>
+      <span class="small">${currentPlacementsView(game.id)}</span>
+    </div>
+  `;
+}
+// ---------- KI-Songs: Texteingabe statt Buzzer ----------
+// Gleicher Punkte-Rhythmus wie beim Buzzer (3-2-1 für die ersten drei richtig markierten Teams
+// in Zeit-Reihenfolge), aber die Regie sieht hier zusätzlich den getippten Titel zur Prüfung.
+// Der Titel wird nirgends öffentlich (Beamer/Team) angezeigt, nur hier in der Regie.
+function guessPanel(game) {
+  const round = gameState.round || 1;
+  const rounds = ((gameData[game.id] || {}).rounds) || {};
+  const guesses = (rounds[round] || {}).guesses || {};
+  const marks = (rounds[round] || {}).marks || {};
+
+  const order = Object.entries(guesses).filter(([, g]) => g && g.ts).sort((a, b) => a[1].ts - b[1].ts);
+  const correctCount = order.filter(([id]) => marks[id] === 'correct').length;
+  const nextUp = order.find(([id]) => !marks[id]);
+  const canMarkMore = correctCount < 3 && nextUp;
+
+  let orderHtml = order.length ? `
+    <table><thead><tr><th>#</th><th>Team</th><th>Zeit</th><th>Getippter Titel</th><th></th></tr></thead><tbody>
+      ${order.map(([id, g], i) => {
+        const baseTs = order[0][1].ts;
+        const mark = marks[id];
+        const status = mark === 'correct' ? '✓ richtig' : mark === 'wrong' ? '✗ falsch' : (nextUp && nextUp[0] === id && canMarkMore ? '→ jetzt dran' : 'wartet');
+        return `<tr><td>${i + 1}</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span>${escapeHtml((teams[id] || {}).name || id)}</td>
+          <td class="small">+${((g.ts - baseTs) / 1000).toFixed(1)} s</td><td>${escapeHtml(g.title || '')}</td><td class="small">${status}</td></tr>`;
+      }).join('')}
+    </tbody></table>
+  ` : `<div class="small">Noch keine Antworten eingegangen.</div>`;
+
+  let actionHtml = '';
+  if (canMarkMore) {
+    actionHtml = `
+      <div class="row-flex" style="margin-top:10px;">
+        <span>${escapeHtml((teams[nextUp[0]] || {}).name || '')} hat "${escapeHtml(nextUp[1].title || '')}" getippt:</span>
+        <button onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', true)">Richtig</button>
+        <button class="ghost" onclick="markBuzz('${game.id}', ${round}, '${nextUp[0]}', false)">Falsch</button>
+      </div>
+    `;
+  }
+
+  const roundPts = roundPoints(game, round);
+  const roundPtsHtml = `<div class="small" style="margin-top:8px;">Punkte diese Runde: ${
+    Object.entries(roundPts).map(([id, p]) => `${escapeHtml((teams[id] || {}).name || id)}: ${p}`).join(', ') || '–'
+  }</div>`;
+
+  const totals = totalInternalPoints(game);
+  const totalsHtml = `<div class="small" style="margin-top:4px;">Gesamt über alle Runden: ${
+    Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([id, p]) => `${escapeHtml((teams[id] || {}).name || id)}: ${p}`).join(', ') || '–'
+  }</div>`;
+
+  const song = game.songs && game.songs[round - 1];
+  const songHtml = song ? `<div class="small" style="margin-bottom:8px;">Original zu dieser Runde (nur für die Regie): <strong>${escapeHtml(song.title)}</strong></div>` : '';
+
+  return `
+    <div class="row-flex">
+      <span>Runde ${round} / ${game.rounds}</span>
+      <button class="ghost" onclick="setGameState({round: Math.max(1, ${round} - 1)})">Zurück</button>
+      <button class="ghost" onclick="setGameState({round: Math.min(${game.rounds}, ${round} + 1)})">Nächste Runde</button>
+    </div>
+    ${songHtml}
     ${orderHtml}
     ${actionHtml}
     ${roundPtsHtml}

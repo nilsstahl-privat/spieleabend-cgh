@@ -96,8 +96,8 @@ type: "grouprace", videoUrl: "dreibein-video.mp4", videoRate: 1,
 },
 {
 id: "songs", name: "KI-Songs erraten", sub: "Lobpreisteam", accent: "#C79A3D", soft: "#FBF3E0",
-rule: "Hört gut zu. Drückt den Buzzer, sobald ihr das Original erkennt, aber erst wenn das Lied zu Ende ist, wird ausgewertet.",
-type: "buzzer", rounds: 3, roundSeconds: null, roundLabel: "Lied",
+rule: "Hört gut zu und tragt ein, wie das Original heißt, sobald ihr es erkennt.",
+type: "guess", rounds: 3, roundSeconds: null, roundLabel: "Lied",
 // Von Klaus Göttler textlich mit KI umgedichtete und neu vertonte Lobpreislieder, eins pro Runde.
 songs: [
 { title: "Neues Leben", url: "https://cdn1.suno.ai/1d20b8a3-f1cd-4290-a008-deb8b97e58cc.mp3" },

@@ -80,6 +80,7 @@ function activeView(game) {
   if (game.type === 'manual') return manualActiveView(game);
   if (game.type === 'value') return valueActiveView(game);
   if (game.type === 'grouprace') return groupRaceActiveView(game);
+  if (game.type === 'guess') return guessActiveView(game);
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big">${escapeHtml(game.name)}</div>
@@ -348,6 +349,30 @@ function buzzerRevealView(game) {
     ${reveal}
     ${numbersBlock(game, round)}
     <div style="margin-top: 24px;">${rows || '<div class="rule-big">Niemand hat gebuzzert.</div>'}</div>
+  `;
+}
+
+// ---------- KI-Songs: Texteingabe statt Buzzer ----------
+// Wie buzzerActiveView, aber ohne Buzzer-Button - die Teams tippen den Titel auf ihrem eigenen
+// Gerät ein. Titel werden hier NIE angezeigt, nur die Anzahl der bereits eingegangenen Antworten.
+function guessActiveView(game) {
+  const round = gameState.round || 1;
+  const guesses = (((gameData[game.id] || {}).rounds || {})[round] || {}).guesses || {};
+  const label = game.roundLabel ? game.roundLabel + ' ' + round : 'Runde ' + round + ' von ' + game.rounds;
+  const song = game.songs && game.songs[round - 1];
+  const audio = song ? `
+    <audio data-song-url="${escapeHtml(song.url)}" src="${song.url}" controls autoplay style="margin-top: 24px; width: 100%; max-width: 560px;"></audio>
+    <div class="rule-big" style="font-size: clamp(14px,1.4vw,18px); margin-top:6px; opacity:0.7;">Spielt der Beamer-Ton nicht automatisch, einmal auf Play tippen.</div>
+  ` : '';
+  const count = Object.keys(guesses).length;
+  return `
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big">${escapeHtml(game.name)}</div>
+    <div class="rule-big">${label}, tragt den Titel auf eurem Gerät ein</div>
+    ${audio}
+    <div class="rule-big" style="margin-top:6px;">Verbleibende Zeit</div>
+    <div class="timer-big" id="timerBig" style="font-size: clamp(40px,8vw,100px); margin-top:0;">--:--</div>
+    <div class="rule-big">${count} Team${count === 1 ? '' : 's'} ${count === 1 ? 'hat' : 'haben'} schon geantwortet</div>
   `;
 }
 
