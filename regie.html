@@ -78,11 +78,6 @@
   </div>
 
   <div class="panel">
-    <h2>Team-Displays, live Vorschau</h2>
-    <div class="grid-2" id="teamStatusGrid"></div>
-  </div>
-
-  <div class="panel">
     <h2>Räume-Übersicht</h2>
     <div class="row-flex" style="margin-bottom:10px;">
       <button onclick="startNextRoundPick()">Nächste Runde, Gruppe auslosen</button>
@@ -241,21 +236,6 @@ function renderTeamOverview() {
   ` : `<div class="small">Noch keine Teams angemeldet.</div>`;
 }
 function removeTeam(id) { if (confirm('Team wirklich entfernen?')) db.ref('teams/' + id).remove(); }
-
-// ---------- Team-Displays, grobe Live-Vorschau ----------
-// Kein echtes Mirroring, jedes Team-iPad meldet nur einen kurzen Status-Text (siehe team.html).
-function renderTeamStatusGrid() {
-  const el = document.getElementById('teamStatusGrid');
-  if (!el) return;
-  const entries = Object.entries(teams);
-  el.innerHTML = entries.length ? entries.map(([id, t]) => `
-    <div class="status-tile">
-      <span class="dot" style="background:${teamColor(t)};"></span>
-      <span class="name">${escapeHtml(t.name)}</span>
-      <div class="status">${escapeHtml(t.status || 'Online')}</div>
-    </div>
-  `).join('') : '<div class="small">Noch keine Teams angemeldet.</div>';
-}
 
 // ---------- Räume-Übersicht und Zufalls-Auswahl ----------
 // "Nächste Runde": lost fair aus, welches Team als nächstes die Box aussuchen darf.
@@ -546,12 +526,15 @@ function groupRacePanel(game) {
   const laneRows = !isDone ? currentGroup.map(id => {
     const t = teams[id] || {};
     const done = values[id] != null;
+    const inputId = 'groupTimeFix_' + game.id + '_' + id;
     return `
       <div class="row-flex">
         <span class="dot" style="background:${teamColor(t)};"></span>
         <span style="min-width:140px;">${escapeHtml(t.name || '')}</span>
         <button class="ghost" ${(!currentStart || done) ? 'disabled' : ''} onclick="stopGroupLane('${id}', '${game.id}')">Stopp</button>
         <span class="small">${done ? values[id] + ' s' : '–'}</span>
+        <input id="${inputId}" type="number" step="0.1" placeholder="Zeit korrigieren" value="${done ? values[id] : ''}" style="width:90px;">
+        <button class="ghost" onclick="correctGroupTime('${id}', '${game.id}', '${inputId}')">Speichern</button>
       </div>
     `;
   }).join('') : '';
@@ -580,6 +563,13 @@ function stopGroupLane(teamId, gameId) {
   if (!start) { alert('Zuerst Start drücken.'); return; }
   const seconds = Math.round((Date.now() - start) / 100) / 10;
   db.ref('games/' + gameId + '/values/' + teamId).set(seconds).catch(console.error);
+}
+function correctGroupTime(teamId, gameId, inputId) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  const val = parseFloat(el.value);
+  if (isNaN(val)) { alert('Bitte eine gültige Zeit (in Sekunden) eingeben.'); return; }
+  db.ref('games/' + gameId + '/values/' + teamId).set(val).catch(console.error);
 }
 
 function racePanel(game) {
@@ -842,7 +832,6 @@ function render() {
   renderReleaseButton();
   renderPrioReleaseButton();
   renderTeamOverview();
-  renderTeamStatusGrid();
   renderRoomsGrid();
   renderPickerStatus();
   renderGameControlPanel();
