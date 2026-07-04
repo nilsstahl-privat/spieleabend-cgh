@@ -189,6 +189,20 @@ if (list[i] && fuzzyMatch(list[i], food)) return list[i];
 }
 return '';
 }
+// ---------- Rang mit Gleichstand für die Gesamt-Rangliste ----------
+// entries: bereits absteigend nach Punkten sortiertes Array von [id, punkte].
+// Gibt dasselbe Array zurück, ergänzt um ein drittes Element "rang" pro Eintrag:
+// gleiche Punktzahl -> gleicher Rang, danach springt der nächste Rang um die Anzahl
+// der Gleichstand-Teams weiter (Standard-Wettkampf-Rangfolge), z.B. zwei Teams teilen
+// sich Rang 1, das nächste Team ist dann Rang 3, nicht Rang 2.
+function withRanks(entries) {
+const result = [];
+entries.forEach(([id, pts], i) => {
+const rang = (i > 0 && entries[i - 1][1] === pts) ? result[i - 1][2] : i + 1;
+result.push([id, pts, rang]);
+});
+return result;
+}
 function escapeHtml(str) {
 const div = document.createElement('div');
 div.textContent = str == null ? '' : String(str);

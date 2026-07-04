@@ -36,6 +36,10 @@
   .room-tile.done { opacity: 0.5; }
   .room-tile .name { display:block; font-weight: 800; font-size: 13px; }
   .room-tile .sub { font-weight: 400; font-size: 11px; color: var(--ink-soft); }
+  .stopwatch-btn { font-size: 18px; padding: 16px 26px; border-radius: 12px; min-width: 110px; }
+  .stopwatch-btn.go { background: var(--teal); color: var(--ink); box-shadow: 0 0 0 3px var(--teal-soft); }
+  .stopwatch-btn.stop { background: #B24C63; color: white; }
+  .stopwatch-btn.stop:disabled { background: var(--line); color: var(--ink-soft); opacity: 0.6; }
 </style>
 </head>
 <body>
@@ -46,6 +50,15 @@
       <h1 style="font-size: 30px;">Erobere die Christusgemeinde Hemmingen</h1>
     </div>
     <span id="connBadge" class="small"></span>
+  </div>
+
+  <!-- Sinkt automatisch weiter unten hin, sobald alle Teams priorisiert haben, siehe renderPrioPanel(). -->
+  <div class="panel" id="prioPanel" style="order:-10;">
+    <h2 id="prioPanelTitle">Prioritäten-Auswahl freigeben</h2>
+    <div class="row-flex">
+      <button id="prioReleaseBtn" onclick="togglePriosReleased()"></button>
+      <span class="small" id="prioStatusText"></span>
+    </div>
   </div>
 
   <div class="panel">
@@ -68,15 +81,6 @@
   <div class="panel" id="gameControlPanel"><h2>Spiel-Steuerung</h2><div class="small">Wähle oben eine Box.</div></div>
 
   <div class="panel">
-    <h2>Teams (<span id="teamCount">0</span>)</h2>
-    <div class="row-flex" style="margin-bottom:10px;">
-      <button class="ghost" onclick="resetEverything()">Alles zurücksetzen, nur zum Testen</button>
-      <button class="ghost" id="prioReleaseBtn" onclick="togglePriosReleased()"></button>
-    </div>
-    <div id="teamOverview"></div>
-  </div>
-
-  <div class="panel">
     <h2>Räume-Übersicht</h2>
     <div class="row-flex" style="margin-bottom:10px;">
       <button onclick="startNextRoundPick()">Nächste Runde, Gruppe auslosen</button>
@@ -88,6 +92,14 @@
   <div class="panel">
     <h2>Gesamtwertung</h2>
     <div id="leaderboard"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Teams (<span id="teamCount">0</span>)</h2>
+    <div class="row-flex" style="margin-bottom:10px;">
+      <button class="ghost" onclick="resetEverything()">Alles zurücksetzen, nur zum Testen</button>
+    </div>
+    <div id="teamOverview"></div>
   </div>
 </div>
 
@@ -124,11 +136,30 @@ function resetEverything() {
   db.ref('gameState').set({ activeGameId: null, phase: 'idle', round: 1, timerEndsAt: null, timerDuration: null, quizReveal: false, priosReleased: false, currentPicker: null, pickerChoice: null, pickQueue: [] });
 }
 function togglePriosReleased() { setGameState({ priosReleased: !gameState.priosReleased }); }
-function renderPrioReleaseButton() {
-  const el = document.getElementById('prioReleaseBtn');
-  if (!el) return;
+// Adaptive Reihenfolge: Diese Box steht ganz am Anfang, solange die Freigabe/Priorisierung noch
+// läuft (wichtig beim Einlass), und sinkt automatisch weiter nach unten (per CSS "order" im Grid),
+// sobald freigegeben ist UND wirklich alle aktuellen Teams ihre Prioritäten eingetragen haben.
+function renderPrioPanel() {
+  const panel = document.getElementById('prioPanel');
+  const btn = document.getElementById('prioReleaseBtn');
+  const statusText = document.getElementById('prioStatusText');
+  const title = document.getElementById('prioPanelTitle');
+  if (!panel || !btn || !statusText || !title) return;
   const released = !!gameState.priosReleased;
-  el.textContent = released ? 'Priorisierung wieder sperren' : 'Priorisierung freigeben';
+  btn.textContent = released ? 'Priorisierung wieder sperren' : 'Priorisierung freigeben';
+  const teamList = Object.values(teams);
+  const doneCount = teamList.filter(t => (t.prios || []).length > 0).length;
+  statusText.textContent = teamList.length ? `${doneCount} von ${teamList.length} Teams haben priorisiert` : 'Noch keine Teams da.';
+  const allDone = teamList.length > 0 && released && doneCount === teamList.length;
+  if (allDone) {
+    panel.style.order = '20';
+    panel.style.opacity = '0.55';
+    title.textContent = 'Prioritäten-Auswahl, erledigt';
+  } else {
+    panel.style.order = '-10';
+    panel.style.opacity = '1';
+    title.textContent = 'Prioritäten-Auswahl freigeben';
+  }
 }
 
 function setGameState(patch) { db.ref('gameState').update(patch); }
@@ -280,7 +311,9 @@ function startNextRoundPick() {
   }
   if (!queue.length) { alert('Noch keine Teams angemeldet.'); return; }
   const nextId = queue.shift();
-  setGameState({ currentPicker: nextId, pickerChoice: null, pickQueue: queue });
+  // Schaltet die Präsentation automatisch auf die Räume-Übersicht, damit niemand manuell
+  // die Phase umstellen muss, sobald die nächste Auslosung gestartet wird.
+  setGameState({ currentPicker: nextId, pickerChoice: null, pickQueue: queue, phase: 'rooms' });
 }
 function startPickedGame() {
   if (!gameState.pickerChoice) return;
@@ -512,7 +545,7 @@ function groupRacePanel(game) {
 
   const startRow = !isDone ? `
     <div class="row-flex" style="margin-bottom:10px;">
-      <button onclick="startGroupRace('${game.id}')">Start für diese Gruppe</button>
+      <button class="stopwatch-btn go" onclick="startGroupRace('${game.id}')">Start für diese Gruppe</button>
       <span class="small">${currentStart ? 'Läuft…' : 'Noch nicht gestartet'}</span>
     </div>
   ` : '';
@@ -525,7 +558,7 @@ function groupRacePanel(game) {
       <div class="row-flex">
         <span class="dot" style="background:${teamColor(t)};"></span>
         <span style="min-width:140px;">${escapeHtml(t.name || '')}</span>
-        <button class="ghost" ${(!currentStart || done) ? 'disabled' : ''} onclick="stopGroupLane('${id}', '${game.id}')">Stopp</button>
+        <button class="stopwatch-btn stop" ${(!currentStart || done) ? 'disabled' : ''} onclick="stopGroupLane('${id}', '${game.id}')">Stopp</button>
         <span class="small">${done ? values[id] + ' s' : '–'}</span>
         <input id="${inputId}" type="number" step="0.1" placeholder="Zeit korrigieren" value="${done ? values[id] : ''}" style="width:90px;">
         <button class="ghost" onclick="correctGroupTime('${id}', '${game.id}', '${inputId}')">Speichern</button>
@@ -593,8 +626,8 @@ function racePanel(game) {
       <span class="small">ist dran, Team ${currentIndex + 1} von ${order.length}</span>
     </div>
     <div class="row-flex">
-      <button onclick="startRace()">Start</button>
-      <button class="ghost" onclick="stopLane('${currentTeamId}', '${game.id}', ${currentIndex})">Stopp</button>
+      <button class="stopwatch-btn go" onclick="startRace()">Start</button>
+      <button class="stopwatch-btn stop" ${window._raceStart ? '' : 'disabled'} onclick="stopLane('${currentTeamId}', '${game.id}', ${currentIndex})">Stopp</button>
       <span class="small" id="raceStartInfo">${window._raceStart ? 'Läuft…' : 'Nicht gestartet'}</span>
     </div>
   `;
@@ -608,7 +641,10 @@ function racePanel(game) {
     <div class="small" style="margin-top:14px; font-weight:800;">Zeit-Rangliste, live:</div>
     ${raceTimeLeaderboard(times)}
     <div class="small" style="margin-top:10px;">Platzierung wird automatisch aus den schnellsten Zeiten berechnet, sobald genug Zeiten vorliegen.</div>
-    <div class="row-flex" style="margin-top:8px;">${currentPlacementsView(game.id)}</div>
+    <div class="row-flex" style="margin-top:8px;">
+      <button onclick="applyPlacements('${game.id}', (gameData.${game.id}||{}).values || {}, false)">Platzierung übernehmen</button>
+      <span class="small">${currentPlacementsView(game.id)}</span>
+    </div>
   `;
 }
 function startRace() { window._raceStart = Date.now(); render(); }
@@ -934,9 +970,10 @@ function computeLeaderboard() {
   return Object.entries(totals).sort((a, b) => b[1] - a[1]);
 }
 function renderLeaderboard() {
-  const ranked = computeLeaderboard();
-  document.getElementById('leaderboard').innerHTML = ranked.length ? ranked.map(([id, pts], i) => `
-    <div class="lb-row ${i === 0 ? 'first' : ''}">
+  const ranked = withRanks(computeLeaderboard());
+  document.getElementById('leaderboard').innerHTML = ranked.length ? ranked.map(([id, pts, rang]) => `
+    <div class="lb-row ${rang === 1 ? 'first' : ''}">
+      <span style="font-weight:900; min-width:26px;">${rang}.</span>
       <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
       <span style="flex:1; font-weight:700;">${escapeHtml((teams[id] || {}).name || '?')}</span>
       <span style="font-weight:900;">${pts} Pkt.</span>
@@ -948,7 +985,7 @@ function render() {
   renderConnBadge();
   renderGameGrid();
   renderPhaseRow();
-  renderPrioReleaseButton();
+  renderPrioPanel();
   renderTeamOverview();
   renderRoomsGrid();
   renderPickerStatus();

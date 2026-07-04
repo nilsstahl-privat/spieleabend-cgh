@@ -122,11 +122,12 @@ function renderLeaderboard() {
       });
     });
   });
-  const ranked = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  const ranked = withRanks(Object.entries(totals).sort((a, b) => b[1] - a[1]));
   const el = document.getElementById('leaderboard');
   if (!el) return;
-  el.innerHTML = ranked.length ? ranked.map(([id, pts], i) => `
-    <div class="lb-row ${i === 0 ? 'first' : ''}">
+  el.innerHTML = ranked.length ? ranked.map(([id, pts, rang]) => `
+    <div class="lb-row ${rang === 1 ? 'first' : ''}">
+      <span style="font-weight:900; min-width:26px;">${rang}.</span>
       <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
       <span style="flex:1; font-weight:700;">${escapeHtml((teams[id] || {}).name || '?')}</span>
       <span style="font-weight:900;">${pts} Pkt.</span>

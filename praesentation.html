@@ -430,14 +430,14 @@ function leaderboardView() {
       });
     });
   });
-  const ranked = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  const ranked = withRanks(Object.entries(totals).sort((a, b) => b[1] - a[1]));
   return `
     <div class="eyebrow-big">Rangliste</div>
     <div class="title-big" style="font-size: clamp(34px,5vw,60px);">Wer erobert die Gemeinde?</div>
     <div class="lb-list">
-      ${ranked.map(([id, pts], i) => `
-        <div class="lb-row ${i === 0 ? 'first' : ''}">
-          <div class="lb-rank">${i + 1}.</div>
+      ${ranked.map(([id, pts, rang]) => `
+        <div class="lb-row ${rang === 1 ? 'first' : ''}">
+          <div class="lb-rank">${rang}.</div>
           <span class="dot" style="background:${teamColor(teams[id] || {})};"></span>
           <div class="lb-name">${escapeHtml((teams[id] || {}).name || '?')}</div>
           <div class="lb-points">${pts} Pkt.</div>
@@ -465,10 +465,33 @@ function drawingView(game) {
   `;
 }
 
+// Zeigt live, wer gerade dran ist bzw. was gewählt wurde, aber NUR den Namen/das Thema
+// der Box, nie die Spielregeln (die Teams sollen die Regeln erst live erfahren).
+function pickerLiveBlock() {
+  const pickerId = gameState.currentPicker;
+  if (!pickerId) return '';
+  const team = teams[pickerId] || {};
+  if (gameState.pickerChoice) {
+    const chosen = gameById(gameState.pickerChoice);
+    return `
+      <div class="rule-big" style="margin-top:14px;">
+        <span class="dot" style="background:${teamColor(team)};"></span>
+        <strong>${escapeHtml(team.name || '?')}</strong> hat <strong>${escapeHtml(chosen ? chosen.sub : '?')}</strong> gewählt
+      </div>
+    `;
+  }
+  return `
+    <div class="rule-big" style="margin-top:14px;">
+      <span class="dot" style="background:${teamColor(team)};"></span>
+      <strong>${escapeHtml(team.name || '?')}</strong> wählt gerade die nächste Box aus …
+    </div>
+  `;
+}
 function roomsView() {
   return `
     <div class="eyebrow-big">Räume-Übersicht</div>
     <div class="title-big" style="font-size: clamp(34px,5vw,60px);">Welche Box kommt als Nächstes?</div>
+    ${pickerLiveBlock()}
     <div class="lb-list" style="margin-top:20px; max-width:900px;">
       ${GAMES.map(g => {
         const done = !!((gameData[g.id] || {}).done);
