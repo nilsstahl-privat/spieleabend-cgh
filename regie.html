@@ -139,7 +139,7 @@ function renderPrioReleaseButton() {
 
 function setGameState(patch) { db.ref('gameState').update(patch); }
 // Neue Box ausgewählt: Handys bleiben bewusst auf dem Holding Screen, bis explizit freigegeben wird.
-function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false, numbersReveal: false }); }
+function setActiveGame(id) { setGameState({ activeGameId: id, phase: 'rules', round: 1, quizReveal: false, teamsReleased: false, numbersReveal: false, buzzOrderReveal: false }); }
 function setPhase(phase) {
   setGameState({ phase });
   if (phase === 'closed') {
@@ -759,14 +759,20 @@ function buzzerPanel(game) {
       <button class="ghost" onclick="setGameState({numbersReveal: ${gameState.numbersReveal ? 'false' : 'true'}})">${gameState.numbersReveal ? 'Auflösung wieder verbergen' : 'Auflösung auf der Leinwand zeigen'}</button>
     </div>
   ` : '';
+  const buzzOrderRevealBtn = `
+    <div class="row-flex" style="margin-top:10px;">
+      <button class="ghost" ${!order.length ? 'disabled' : ''} onclick="setGameState({buzzOrderReveal: ${gameState.buzzOrderReveal ? 'false' : 'true'}})">${gameState.buzzOrderReveal ? 'Buzz-Reihenfolge auf der Leinwand verbergen' : 'Buzz-Reihenfolge auf der Leinwand zeigen'}</button>
+    </div>
+  `;
 
   return `
     <div class="row-flex">
       <span>Runde ${round} / ${game.rounds}</span>
-      <button class="ghost" onclick="setGameState({round: Math.max(1, ${round} - 1), numbersReveal: false})">Zurück</button>
-      <button class="ghost" onclick="setGameState({round: Math.min(${game.rounds}, ${round} + 1), numbersReveal: false})">Nächste Runde</button>
+      <button class="ghost" onclick="setGameState({round: Math.max(1, ${round} - 1), numbersReveal: false, buzzOrderReveal: false})">Zurück</button>
+      <button class="ghost" onclick="setGameState({round: Math.min(${game.rounds}, ${round} + 1), numbersReveal: false, buzzOrderReveal: false})">Nächste Runde</button>
     </div>
     ${numbersRevealBtn}
+    ${buzzOrderRevealBtn}
     ${orderHtml}
     ${actionHtml}
     ${roundPtsHtml}
