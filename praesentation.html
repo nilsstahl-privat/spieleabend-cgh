@@ -79,6 +79,7 @@ function activeView(game) {
   if (game.type === 'race') return raceActiveView(game);
   if (game.type === 'manual') return manualActiveView(game);
   if (game.type === 'value') return valueActiveView(game);
+  if (game.type === 'grouprace') return groupRaceActiveView(game);
   return `
     <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
     <div class="title-big">${escapeHtml(game.name)}</div>
@@ -93,6 +94,44 @@ function groupStatusText(g) {
   if (groupIndex >= groups.length) return 'Alle Gruppen sind dran gewesen';
   const names = groups[groupIndex].map(id => escapeHtml((teams[id] || {}).name || id)).join(', ');
   return `Gruppe ${groupIndex + 1} von ${groups.length} ist dran: ${names}`;
+}
+
+// Zeigt die ausgeloste Reihenfolge/Gruppen dauerhaft an, damit alle sehen, in welcher
+// Reihenfolge gespielt wird (nicht nur, wer gerade dran ist).
+function raceOrderBlock(order, currentIndex, values) {
+  if (!order.length) return '';
+  return `
+    <div style="margin-top:22px; max-width:760px; margin-left:auto; margin-right:auto; text-align:left;">
+      <div style="font-weight:800; text-transform:uppercase; letter-spacing:0.08em; font-size:16px; color:var(--ink-soft); margin-bottom:8px; text-align:center;">Ausgeloste Reihenfolge</div>
+      ${order.map((id, i) => {
+        const t = teams[id] || {};
+        const isCurrent = i === currentIndex;
+        const isDone = values[id] !== undefined && values[id] !== null && values[id] !== '';
+        return `<div class="order-row" style="justify-content:flex-start; ${isCurrent ? 'font-weight:900;' : ''}">
+          <span style="width:30px; text-align:right;">${i + 1}.</span>
+          <span class="dot" style="background:${teamColor(t)};"></span>
+          <span style="flex:1; text-align:left;">${escapeHtml(t.name || '')}</span>
+          <span>${isCurrent ? '▶ jetzt dran' : isDone ? '✓' : ''}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+function groupsListBlock(groups, currentGroupIndex) {
+  if (!groups.length) return '';
+  return `
+    <div style="margin-top:22px; max-width:900px; margin-left:auto; margin-right:auto; display:flex; flex-direction:column; gap:8px; text-align:left;">
+      <div style="font-weight:800; text-transform:uppercase; letter-spacing:0.08em; font-size:16px; color:var(--ink-soft); margin-bottom:2px; text-align:center;">Ausgeloste Gruppen</div>
+      ${groups.map((grp, i) => {
+        const isCurrent = i === currentGroupIndex;
+        const names = grp.map(id => `<span class="dot" style="background:${teamColor(teams[id] || {})};"></span> ${escapeHtml((teams[id] || {}).name || '')}`).join('&nbsp;&nbsp;&nbsp;');
+        return `<div class="order-row" style="justify-content:flex-start; ${isCurrent ? 'font-weight:900;' : ''}">
+          <span style="width:120px; text-align:left;">Gruppe ${i + 1}${isCurrent ? ' ▶' : ''}</span>
+          <span style="flex:1; text-align:left;">${names}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
 }
 
 function manualActiveView(game) {
@@ -119,6 +158,7 @@ function valueActiveView(game) {
         <tr><td>${i + 1}.</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span> ${escapeHtml((teams[id] || {}).name || '')}</td><td>${v}</td></tr>
       `).join('') || `<tr><td colspan="3">Noch keine Werte.</td></tr>`}
     </tbody></table>
+    ${groupsListBlock(g.groups || [], g.currentGroupIndex || 0)}
   `;
 }
 
@@ -142,6 +182,25 @@ function raceActiveView(game) {
         <tr><td>${i + 1}.</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span> ${escapeHtml((teams[id] || {}).name || '')}</td><td>${t} s</td></tr>
       `).join('') || `<tr><td colspan="3">Noch keine Zeiten.</td></tr>`}
     </tbody></table>
+    ${raceOrderBlock(order, currentIndex, times)}
+  `;
+}
+
+function groupRaceActiveView(game) {
+  const g = gameData[game.id] || {};
+  const values = g.values || {};
+  const running = !!g.currentStart;
+  const ranked = Object.entries(values).filter(([, v]) => v !== undefined && v !== null && v !== '').sort((a, b) => a[1] - b[1]);
+  return `
+    <div class="eyebrow-big" style="color:${game.accent};">${escapeHtml(game.sub)}</div>
+    <div class="title-big">${escapeHtml(game.name)}</div>
+    <div class="rule-big">${groupStatusText(g)}${running ? ' — Zeitnahme läuft…' : ''}</div>
+    <table class="wide" style="margin-top:20px;"><thead><tr><th>Platz</th><th>Team</th><th>Zeit</th></tr></thead><tbody>
+      ${ranked.map(([id, t], i) => `
+        <tr><td>${i + 1}.</td><td><span class="dot" style="background:${teamColor(teams[id] || {})};"></span> ${escapeHtml((teams[id] || {}).name || '')}</td><td>${t} s</td></tr>
+      `).join('') || `<tr><td colspan="3">Noch keine Zeiten.</td></tr>`}
+    </tbody></table>
+    ${groupsListBlock(g.groups || [], g.currentGroupIndex || 0)}
   `;
 }
 

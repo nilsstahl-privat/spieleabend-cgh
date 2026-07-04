@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gruppenzuteilung am Einlass</title>
+<link rel="stylesheet" href="brand.css">
+<style>
+  body { padding: 24px 16px 60px; }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 6px 0 4px; }
+  .hint { color: var(--ink-soft); font-size: 14px; margin-bottom: 24px; }
+  .age-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 28px; }
+  .age-btn { padding: 28px 10px; border-radius: 16px; border: 2px solid var(--line); background: white; font-weight: 900; font-size: 18px; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; text-align:center; }
+  .age-btn:active { transform: scale(0.97); }
+  .age-btn.young { border-color: var(--teal); }
+  .age-btn.mid { border-color: var(--yellow); }
+  .age-btn.old { border-color: var(--taupe); }
+  .result { text-align:center; border-radius: 20px; padding: 34px 20px; margin-bottom: 24px; min-height: 90px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 8px; }
+  .result .dot { width: 26px; height:26px; border-radius:50%; display:inline-block; margin-right: 10px; vertical-align:middle; }
+  .result .name { font-size: 34px; font-weight: 900; }
+  .result .who { color: var(--ink-soft); font-size: 14px; text-transform:uppercase; letter-spacing:0.06em; }
+  .result.empty { color: var(--ink-soft); font-weight: 600; font-size: 15px; }
+  table.overview { width:100%; border-collapse: collapse; font-size: 14px; }
+  table.overview th, table.overview td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align:center; }
+  table.overview th:first-child, table.overview td:first-child { text-align:left; }
+  .total-badge { font-weight: 900; }
+  .reset-row { text-align:center; margin-top: 20px; }
+  button.ghost { min-height: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="eyebrow">Einlass</span>
+  <h1>Gruppenzuteilung</h1>
+  <div class="hint">Antippen, aus welcher Altersgruppe die Person gerade kommt. Jede Altersgruppe füllt die 8 Gruppen der Reihe nach, unabhängig von den anderen Altersgruppen.</div>
+
+  <div class="age-grid">
+    <div class="age-btn young" onclick="assign('young')">Jünger</div>
+    <div class="age-btn mid" onclick="assign('mid')">Mittel</div>
+    <div class="age-btn old" onclick="assign('old')">Älter</div>
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <div class="panel">
+    <h2 style="font-size:12px; letter-spacing:0.06em; color:var(--ink-soft); text-transform:uppercase; margin-bottom:10px;">Übersicht</h2>
+    <table class="overview" id="overviewTable"></table>
+  </div>
+
+  <div class="reset-row">
+    <button class="ghost" onclick="resetAll()">Alles zurücksetzen</button>
+  </div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+// Eigenständiges Einlass-Tool, unabhängig von der Firebase-Datenbank des Spieleabends.
+// Zählt pro Altersgruppe (jung/mittel/alt) separat mit, wer als nächstes in welche der
+// 8 Gruppen kommt, damit jede Altersgruppe gleichmäßig auf alle 8 Gruppen verteilt wird.
+const GROUP_COUNT = 8;
+const AGE_LABELS = { young: 'Jünger', mid: 'Mittel', old: 'Älter' };
+const STORAGE_KEY = 'cgh-gruppenzuteilung-v1';
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { counts: { young: 0, mid: 0, old: 0 }, history: [] };
+}
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+let state = loadState();
+
+function groupIndexFor(age) {
+  // Nächste Gruppe für diese Altersgruppe, 1-basiert, zyklisch über alle 8 Gruppen.
+  return (state.counts[age] % GROUP_COUNT) + 1;
+}
+
+function assign(age) {
+  const groupNumber = groupIndexFor(age);
+  state.counts[age] = (state.counts[age] || 0) + 1;
+  state.history.unshift({ age, groupNumber, ts: Date.now() });
+  state.history = state.history.slice(0, 50);
+  saveState();
+  renderResult(age, groupNumber);
+  renderOverview();
+}
+
+function renderResult(age, groupNumber) {
+  const color = (TEAM_COLORS[groupNumber - 1] || {}).hex || '#ccc';
+  const el = document.getElementById('result');
+  el.style.background = color + '22';
+  el.style.border = '3px solid ' + color;
+  el.innerHTML = `
+    <div class="who">${escapeHtml(AGE_LABELS[age])}</div>
+    <div class="name"><span class="dot" style="background:${color};"></span>Gruppe ${groupNumber}</div>
+  `;
+}
+
+function renderOverview() {
+  const el = document.getElementById('overviewTable');
+  const totals = Array.from({ length: GROUP_COUNT }, () => 0);
+  ['young', 'mid', 'old'].forEach(age => {
+    const n = state.counts[age] || 0;
+    for (let i = 0; i < n; i++) totals[i % GROUP_COUNT]++;
+  });
+  const rows = Array.from({ length: GROUP_COUNT }, (_, i) => {
+    const color = (TEAM_COLORS[i] || {}).hex || '#ccc';
+    return `<tr>
+      <td><span class="dot" style="width:14px; height:14px; background:${color};"></span> Gruppe ${i + 1}</td>
+      <td>${totals[i]}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <thead><tr><th>Gruppe</th><th class="total-badge">Personen gesamt</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td>Insgesamt gezählt</td><td class="total-badge">${(state.counts.young||0) + (state.counts.mid||0) + (state.counts.old||0)}
+      &nbsp;(${escapeHtml(AGE_LABELS.young)}: ${state.counts.young||0}, ${escapeHtml(AGE_LABELS.mid)}: ${state.counts.mid||0}, ${escapeHtml(AGE_LABELS.old)}: ${state.counts.old||0})</td></tr></tfoot>
+  `;
+}
+
+function resetAll() {
+  if (!confirm('Wirklich alle Zähler zurücksetzen?')) return;
+  state = { counts: { young: 0, mid: 0, old: 0 }, history: [] };
+  saveState();
+  document.getElementById('result').innerHTML = '';
+  document.getElementById('result').className = 'result empty';
+  document.getElementById('result').style.background = '';
+  document.getElementById('result').style.border = '';
+  document.getElementById('result').textContent = 'Noch keine Zuteilung.';
+  renderOverview();
+}
+
+// Initiale Anzeige
+document.getElementById('result').className = 'result empty';
+document.getElementById('result').textContent = 'Noch keine Zuteilung.';
+renderOverview();
+</script>
+</body>
+</html>

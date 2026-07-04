@@ -313,6 +313,7 @@ function renderGameControlPanel() {
   else if (game.type === 'value') html += valuePanel(game);
   else if (game.type === 'manual') html += manualPanel(game);
   else if (game.type === 'race') html += racePanel(game);
+  else if (game.type === 'grouprace') html += groupRacePanel(game);
   else if (game.type === 'taste') html += tastePanel(game);
   else if (game.type === 'buzzer') html += buzzerPanel(game);
   panel.innerHTML = html;
@@ -487,6 +488,84 @@ function raceTimeLeaderboard(times) {
       `).join('') || '<tr><td colspan="3" class="small">Noch keine Zeiten.</td></tr>'}
     </tbody></table>
   `;
+}
+
+// ---------- Dreibein: mehrere Gruppen gleichzeitig auf Zeit ----------
+// Immer vier Gruppen gleichzeitig, in mehreren Runden nacheinander. Zeiten bleiben über alle
+// Runden gespeichert (games/dreibein/values), bis alle Gruppen durch sind, dann Gesamtplatzierung.
+function groupRacePanel(game) {
+  const g = gameData[game.id] || {};
+  const values = g.values || {};
+  const groups = g.groups || [];
+  const groupIndex = g.currentGroupIndex || 0;
+  const drawing = !!g.drawing;
+  const currentStart = g.currentStart || null;
+
+  if (!groups.length) {
+    return `
+      <div class="small" style="margin-bottom:10px;">Noch keine Gruppen ausgelost. Es bauen immer vier Gruppen gleichzeitig, in mehreren Runden nacheinander.</div>
+      <button ${drawing ? 'disabled' : ''} onclick="drawGroupRaceGroups('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Gruppen auslosen, je 4 Teams'}</button>
+    `;
+  }
+
+  const isDone = groupIndex >= groups.length;
+  const currentGroup = groups[groupIndex] || [];
+
+  const groupNav = `
+    <div class="row-flex" style="margin-bottom:10px; justify-content:space-between;">
+      <span class="small">${isDone ? 'Alle Gruppen sind fertig gebaut.' : `Gruppe ${groupIndex + 1} von ${groups.length} baut gerade`}</span>
+      <div class="row-flex">
+        <button class="ghost" onclick="db.ref('games/${game.id}').update({currentGroupIndex: Math.max(0, ${groupIndex} - 1), currentStart: null})">Zurück</button>
+        <button class="ghost" onclick="db.ref('games/${game.id}').update({currentGroupIndex: Math.min(${groups.length}, ${groupIndex} + 1), currentStart: null})">Nächste Gruppe</button>
+        <button class="ghost" ${drawing ? 'disabled' : ''} onclick="if (confirm('Gruppen neu auslosen? Bereits gemessene Zeiten bleiben erhalten.')) drawGroupRaceGroups('${game.id}')">${drawing ? 'Wird ausgelost…' : 'Neu auslosen'}</button>
+      </div>
+    </div>
+  `;
+
+  const startRow = !isDone ? `
+    <div class="row-flex" style="margin-bottom:10px;">
+      <button onclick="startGroupRace('${game.id}')">Start für diese Gruppe</button>
+      <span class="small">${currentStart ? 'Läuft…' : 'Noch nicht gestartet'}</span>
+    </div>
+  ` : '';
+
+  const laneRows = !isDone ? currentGroup.map(id => {
+    const t = teams[id] || {};
+    const done = values[id] != null;
+    return `
+      <div class="row-flex">
+        <span class="dot" style="background:${teamColor(t)};"></span>
+        <span style="min-width:140px;">${escapeHtml(t.name || '')}</span>
+        <button class="ghost" ${(!currentStart || done) ? 'disabled' : ''} onclick="stopGroupLane('${id}', '${game.id}')">Stopp</button>
+        <span class="small">${done ? values[id] + ' s' : '–'}</span>
+      </div>
+    `;
+  }).join('') : '';
+
+  return `
+    ${groupNav}
+    ${startRow}
+    ${laneRows}
+    <div class="small" style="margin-top:14px; font-weight:800;">Zeit-Rangliste, live über alle Gruppen:</div>
+    ${raceTimeLeaderboard(values)}
+    <div class="row-flex" style="margin-top:12px;">
+      <button onclick="applyPlacements('${game.id}', (gameData.${game.id}||{}).values || {}, false)">Platzierung übernehmen</button>
+      <span class="small">${currentPlacementsView(game.id)}</span>
+    </div>
+  `;
+}
+function drawGroupRaceGroups(gameId) {
+  runDraw(gameId, () => ({ groups: groupsBySize(Object.keys(teams), 4), currentGroupIndex: 0, currentStart: null }));
+}
+function startGroupRace(gameId) {
+  db.ref('games/' + gameId + '/currentStart').set(Date.now());
+}
+function stopGroupLane(teamId, gameId) {
+  const g = gameData[gameId] || {};
+  const start = g.currentStart;
+  if (!start) { alert('Zuerst Start drücken.'); return; }
+  const seconds = Math.round((Date.now() - start) / 100) / 10;
+  db.ref('games/' + gameId + '/values/' + teamId).set(seconds).catch(console.error);
 }
 
 function racePanel(game) {

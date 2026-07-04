@@ -91,8 +91,8 @@ rule: "Fahrt den Rundkurs so schnell wie möglich, ein Team nach dem anderen.", 
 },
 {
 id: "dreibein", name: "Dreibein bauen", sub: "Technik", accent: "#34506B", soft: "#E5EAEF",
-rule: "Baut ein stabiles Dreibein. Die Regie wählt, wer zuerst fertig ist.",
-type: "manual", videoUrl: "dreibein-video.mp4", videoRate: 1,
+rule: "Baut ein stabiles Dreibein, so schnell wie möglich. Es bauen immer vier Gruppen gleichzeitig, in mehreren Runden nacheinander, gemessen wird die Zeit.",
+type: "grouprace", videoUrl: "dreibein-video.mp4", videoRate: 1,
 },
 {
 id: "songs", name: "KI-Songs erraten", sub: "Lobpreisteam", accent: "#C79A3D", soft: "#FBF3E0",

@@ -95,8 +95,21 @@ db.ref('teams').on('value', snap => {
   myTeam = teamsSnapshot[teamId] || null;
   render();
 });
+let pickerChoiceAt = null;
+let pickerChoiceTimer = null;
 db.ref('gameState').on('value', snap => {
+  const prevChoice = gameState.pickerChoice;
   gameState = Object.assign({ activeGameId: null, phase: 'idle', round: 1, teamsReleased: false, priosReleased: false, currentPicker: null, pickerChoice: null }, snap.val() || {});
+  if (gameState.pickerChoice && gameState.pickerChoice !== prevChoice) {
+    // Bestätigung "Ihr habt X gewählt" nur kurz zeigen, danach automatisch zurück zum normalen Bildschirm.
+    pickerChoiceAt = Date.now();
+    if (pickerChoiceTimer) clearTimeout(pickerChoiceTimer);
+    pickerChoiceTimer = setTimeout(render, 3100);
+  }
+  if (!gameState.pickerChoice) {
+    pickerChoiceAt = null;
+    if (pickerChoiceTimer) { clearTimeout(pickerChoiceTimer); pickerChoiceTimer = null; }
+  }
   render();
 });
 db.ref('games').on('value', snap => {
@@ -461,9 +474,13 @@ function render() {
     return;
   }
   if (gameState.currentPicker === teamId) {
-    reportStatus('Wählt die nächste Box aus');
-    app.innerHTML = connBadgeHtml() + myChip() + pickerScreen();
-    return;
+    const showConfirmation = gameState.pickerChoice && pickerChoiceAt && (Date.now() - pickerChoiceAt < 3000);
+    if (!gameState.pickerChoice || showConfirmation) {
+      reportStatus('Wählt die nächste Box aus');
+      app.innerHTML = connBadgeHtml() + myChip() + pickerScreen();
+      return;
+    }
+    // Nach 3 Sekunden Bestätigung: zurück zum normalen Bildschirm, wie bei allen anderen Teams.
   }
   reportStatus(liveStatusText());
   app.innerHTML = connBadgeHtml() + liveScreen();
