@@ -26,7 +26,7 @@
   .order-row { display:flex; align-items:center; gap:16px; justify-content:center; font-size: 22px; margin-bottom: 10px; }
 
   /* Kleine, dauerhafte Countdown-Leiste unten, unabhängig von der jeweils aktiven Ansicht/Box.
-     Startet die Regie den Timer, läuft dieselbe Zeit synchron auf den Team-iPads mit. */
+     Startet die Regie den Timer, läuft dieselbe Zeit synchron auf den Team-Handys mit. */
   body { padding-bottom: 100px; }
   .countdown-bar { position: fixed; left:0; right:0; bottom:0; height: 46px; background: var(--bg);
     border-top: 2px solid var(--line); display:flex; align-items:center; justify-content:center;
@@ -535,7 +535,7 @@ setInterval(() => {
 // ---------- Kleine, dauerhafte Countdown-Leiste ----------
 // Unabhängig von render()/innerHTML (liegt außerhalb von #app), damit sie bei jeder Box/Phase
 // sichtbar bleibt und nicht durch andere Updates stockt. Dieselben Firebase-Felder wie die
-// Team-iPads, damit beide synchron laufen.
+// Team-Handys, damit beide synchron laufen.
 function updateCountdownBar() {
   const bar = document.getElementById('countdownBar');
   const fill = document.getElementById('countdownFill');

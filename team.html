@@ -6,18 +6,18 @@
 <title>Spieleabend, Team</title>
 <link rel="stylesheet" href="brand.css">
 <style>
-  /* Landscape-first, Geräte sind iPads, nicht Handys im Hochformat. */
-  body { padding: 28px 40px 60px; }
-  .wrap { max-width: 780px; margin: 0 auto; }
-  .logo-row { text-align: center; margin-bottom: 24px; }
-  .logo-row h1 { font-size: 26px; line-height: 1.15; }
+  /* Handy-first (Hochformat): Geräte sind normale Smartphones der Teams, keine iPads/Querformat. */
+  body { padding: 16px 14px 60px; }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  .logo-row { text-align: center; margin-bottom: 20px; }
+  .logo-row h1 { font-size: 21px; line-height: 1.2; }
   .logo-row .eyebrow { display:block; margin-bottom: 6px; }
 
-  .color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px; margin: 16px 0; }
+  .color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
   .color-swatch {
     aspect-ratio: 1; border-radius: 14px; border: 3px solid transparent;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
-    color: white; font-weight: 800; font-size: 24px; min-height: 56px;
+    color: white; font-weight: 800; font-size: 22px; min-height: 64px;
   }
   .color-swatch.taken { opacity: 0.25; cursor: not-allowed; }
   .color-swatch.selected { border-color: var(--ink); }
@@ -26,7 +26,7 @@
   .field label { display:block; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); margin-bottom: 6px; }
   .field input { width: 100%; min-height: 48px; font-size: 16px; }
 
-  .prio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 16px 0; }
+  .prio-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 16px 0; }
   .prio-btn {
     display: flex; align-items: center; justify-content: space-between;
     background: white; border: 2px solid var(--line); border-radius: 12px;
@@ -37,9 +37,9 @@
   .prio-count { text-align:center; color: var(--ink-soft); font-size: 13px; margin-bottom: 6px; }
 
   .stage-badge { display:inline-block; background: var(--ink); color: white; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 800; margin-bottom: 14px; }
-  .big-title { font-size: clamp(28px, 6vw, 44px); line-height: 1.05; margin: 6px 0 10px; }
-  .rule-text { font-size: 17px; line-height: 1.5; color: var(--ink-soft); }
-  .timer-big { font-size: 60px; font-weight: 900; text-align: center; margin: 18px 0; font-variant-numeric: tabular-nums; }
+  .big-title { font-size: clamp(24px, 7vw, 36px); line-height: 1.1; margin: 6px 0 10px; }
+  .rule-text { font-size: 16px; line-height: 1.5; color: var(--ink-soft); }
+  .timer-big { font-size: clamp(40px, 14vw, 60px); font-weight: 900; text-align: center; margin: 18px 0; font-variant-numeric: tabular-nums; }
 
   .buzzer-btn {
     width: 100%; max-width: 480px; margin: 20px auto 0; display:block; aspect-ratio: 2; border-radius: 28px; font-size: 30px; font-weight: 900;
@@ -527,7 +527,7 @@ function submitGuess(gameId, round) {
 }
 
 // ---------- Status-Vorschau für die Regie ----------
-// Meldet in Kurzform, was gerade auf dem Team-iPad zu sehen ist, damit die Regie eine
+// Meldet in Kurzform, was gerade auf dem Team-Handy zu sehen ist, damit die Regie eine
 // grobe Übersicht über alle Teams hat, ohne die Bildschirme wirklich zu spiegeln.
 let _lastReportedStatus = null;
 function reportStatus(text) {
